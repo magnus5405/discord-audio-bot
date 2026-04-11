@@ -165,25 +165,34 @@ Note: ElevenLabs voice IDs are available in your account. See [supported voices]
 
 ## Running
 
-### Start the Bot
+### Phase 1 Smoke Runner
 
 ```bash
-python src/main.py
+python -m src.main --list-voice-channels
+python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3
 ```
 
-This will:
+The current phase-one runner is headless and focused on validating Discord voice connectivity. It can:
 1. Load environment variables from `.env`
-2. Start the Discord client in the background
-3. Open a Textual TUI in a new terminal window for control and status
+2. Connect to Discord and print reachable guild/voice channel IDs
+3. Join a selected voice channel and play a local MP3/WAV clip once
+4. Disconnect cleanly when playback completes
 
-### Via the TUI
+If you prefer env fallbacks instead of repeating flags, set `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH`, then run:
 
-- **Select Server**: Click on a guild in the server list
-- **Select Channel**: Choose a voice channel and click "Connect"
-- **Choose Persona**: Use the dropdown to select a bot personality
-- **Start Session**: Click "Start" to begin listening and responding
-- **View Stats**: Monitor total tokens, voice minutes, and current status
-- **Settings**: Open the settings editor to manage personas or update credentials
+```bash
+python -m src.main
+```
+
+### Planned Later
+
+The Textual TUI scaffold remains in the repository, but it is still phase-six work. The current start/stop, selectors, and settings screens are not wired into the live Discord flow yet.
+
+### Phase 1 Workflow
+
+- Run `python -m src.main --list-voice-channels` to find the target channel ID.
+- Run `python -m src.main --channel-id <voice_channel_id> --audio-path <local_mp3_or_wav>` to join and play a clip.
+- Ensure `ffmpeg` is on your `PATH`, and that `discord.py[voice]`, `PyNaCl`, and `davey` are installed.
 
 ## Development & Architecture
 
