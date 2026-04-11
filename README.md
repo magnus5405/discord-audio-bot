@@ -165,18 +165,20 @@ Note: ElevenLabs voice IDs are available in your account. See [supported voices]
 
 ## Running
 
-### Phase 1 Smoke Runner
+### Phase 1 and Phase 2 Smoke Runner
 
 ```bash
 python -m src.main --list-voice-channels
 python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3
+python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3 --receive-smoke
 ```
 
-The current phase-one runner is headless and focused on validating Discord voice connectivity. It can:
+The current headless runner is focused on validating the early voice pipeline before the TUI is wired up. It can:
 1. Load environment variables from `.env`
 2. Connect to Discord and print reachable guild/voice channel IDs
 3. Join a selected voice channel and play a local MP3/WAV clip once
-4. Disconnect cleanly when playback completes
+4. Run a phase-two receive smoke flow that listens, pauses for playback, resumes with a fresh sink, and logs per-user frame summaries
+5. Disconnect cleanly when playback or the smoke flow completes
 
 If you prefer env fallbacks instead of repeating flags, set `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH`, then run:
 
@@ -193,6 +195,12 @@ The Textual TUI scaffold remains in the repository, but it is still phase-six wo
 - Run `python -m src.main --list-voice-channels` to find the target channel ID.
 - Run `python -m src.main --channel-id <voice_channel_id> --audio-path <local_mp3_or_wav>` to join and play a clip.
 - Ensure `ffmpeg` is on your `PATH`, and that `discord.py[voice]`, `PyNaCl`, and `davey` are installed.
+
+### Phase 2 Workflow
+
+- Run `python -m src.main --channel-id <voice_channel_id> --audio-path <local_mp3_or_wav> --receive-smoke` to validate voice receive around playback.
+- Use `--listen-window-seconds <seconds>` if you want shorter or longer listen windows than the 10 second default.
+- Expect two receive summaries in the logs: one before playback and one after playback resumes with a new sink instance.
 
 ## Development & Architecture
 
