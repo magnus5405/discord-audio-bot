@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "discord-audio-bot"
+version = "0.1.0"
+description = "A Discord voice-channel conversational character bot"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Magnus5405", email = "magnus@5405.dk"}
+]
+
+dependencies = [
+    # Discord voice
+    "discord.py[voice]>=2.4.0",
+    "discord-ext-voice-recv>=0.2.0",
+    
+    # Transcription
+    "google-cloud-speech>=2.21.0",
+    
+    # GenAI / Conversation
+    "google-genai>=0.3.0",
+    
+    # Text-to-Speech
+    "elevenlabs>=0.2.0",
+    
+    # TUI
+    "textual>=0.50.0",
+    
+    # Environment variables
+    "python-dotenv>=1.0.0",
+    
+    # Audio processing
+    "PyNaCl>=1.5.0",  # Required for discord.py voice
+    "pydub>=0.25.0",  # Audio manipulation
+    
+    # Optional: Voice Activity Detection
+    "webrtc-vad>=4.3.1",
+    
+    # Utilities
+    "pydantic>=2.0.0",  # Data validation
+    "httpx>=0.25.0",  # Async HTTP client for ElevenLabs
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "isort>=5.12.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/discord-audio-bot"
+Repository = "https://github.com/yourusername/discord-audio-bot.git"
+Issues = "https://github.com/yourusername/discord-audio-bot/issues"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages]
+find = {where = ["src"]}
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+
+[tool.isort]
+profile = "black"
+line_length = 100
