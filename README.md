@@ -82,17 +82,9 @@ You'll need credentials for three services:
    - Keep `MESSAGE_CONTENT` disabled (the bot doesn't read text messages)
 
 #### Google Cloud Setup
-1. Create a [Google Cloud Project](https://console.cloud.google.com/)
-2. **Option A - Gemini Developer API (Simpler)**:
+1. Create a [Google Cloud Project](https://console.cloud.google.com/) **Gemini Developer API** key:
    - Go to [Google AI Studio](https://aistudio.google.com/) and click "Get API key"
    - Copy the API key
-3. **Option B - Vertex AI (requires billing)**:
-   - Enable "Vertex AI API" in your Cloud project
-   - Use service account JSON for authentication (see `PLAN.md` for details)
-4. For **Speech-to-Text**, enable "Cloud Speech-to-Text API" and create a service account:
-   - In Cloud Console: **APIs & Services** → **Credentials** → **Create Service Account**
-   - Download JSON key file and save it locally
-   - Set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json`
 
 #### ElevenLabs API Key
 1. Sign up at [ElevenLabs](https://elevenlabs.io/)
