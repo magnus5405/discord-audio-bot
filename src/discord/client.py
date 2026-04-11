@@ -8,7 +8,7 @@ from contextlib import suppress
 from typing import Callable, Optional
 
 import discord
-from discord.ext.voice_recv import VoiceRecvClient
+from discord.ext.voice_recv import AudioSink, VoiceRecvClient
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +17,10 @@ ClientFactory = Callable[..., discord.Client]
 
 class DiscordClient:
     """
-    Manages connection to Discord gateway and voice channel operations.
+    Manage Discord gateway, voice connection, and receive lifecycle.
 
-    Single entry point to the Discord asyncio event loop.
-    All Discord API calls must happen in this context.
-
-    Phase 1: Voice connectivity
+    Phase 1 established connection and playback. Phase 2 adds explicit helpers
+    for starting and stopping voice receive sessions.
     """
 
     def __init__(
@@ -30,19 +28,15 @@ class DiscordClient:
         token: str,
         client_factory: ClientFactory = discord.Client,
     ) -> None:
-        """
-        Initialize Discord client.
-
-        Args:
-            token: Discord bot token
-            client_factory: Optional client factory for testing
-        """
+        """Initialize the Discord gateway wrapper."""
         self.token = token
         self._client_factory = client_factory
         self.client: Optional[discord.Client] = None
         self.voice_client: Optional[VoiceRecvClient] = None
         self._ready_event = asyncio.Event()
         self._gateway_task: Optional[asyncio.Task[None]] = None
+        self._receive_done_future: Optional[asyncio.Future[None]] = None
+        self._receive_shutdown_error: Optional[Exception] = None
         logger.info("DiscordClient initialized")
 
     def _create_gateway_client(self) -> discord.Client:
@@ -91,8 +85,23 @@ class DiscordClient:
 
         return self.client
 
+    def _require_voice_client(self) -> VoiceRecvClient:
+        if self.voice_client is None or not self.voice_client.is_connected():
+            raise RuntimeError("Discord voice client is not connected.")
+
+        return self.voice_client
+
+    def _reset_receive_state(self) -> None:
+        self._receive_done_future = None
+        self._receive_shutdown_error = None
+
+    def _finalize_receive_shutdown(self, error: Exception | None) -> None:
+        self._receive_shutdown_error = error
+        if self._receive_done_future is not None and not self._receive_done_future.done():
+            self._receive_done_future.set_result(None)
+
     async def connect(self) -> None:
-        """Connect bot to Discord gateway."""
+        """Connect the bot to the Discord gateway."""
         logger.info("Connecting to Discord...")
 
         if self.client is not None and self.client.is_ready():
@@ -112,12 +121,12 @@ class DiscordClient:
         await self._wait_until_ready()
 
     async def get_guilds(self) -> list[discord.Guild]:
-        """Get list of guilds the bot is in."""
+        """Return the guilds available from the ready cache."""
         client = self._require_ready_client()
         return list(client.guilds)
 
     async def get_voice_channels(self, guild_id: int) -> list[discord.VoiceChannel]:
-        """Get voice channels in a guild."""
+        """Return the voice channels in a cached guild."""
         client = self._require_ready_client()
         guild = client.get_guild(guild_id)
         if guild is None:
@@ -126,15 +135,7 @@ class DiscordClient:
         return list(guild.voice_channels)
 
     async def join_voice_channel(self, channel_id: int) -> VoiceRecvClient:
-        """
-        Join a voice channel.
-
-        Args:
-            channel_id: Discord voice channel ID
-
-        Returns:
-            Connected VoiceRecvClient
-        """
+        """Join a voice channel and return the connected receive client."""
         client = self._require_ready_client()
         channel = client.get_channel(channel_id)
         if channel is None:
@@ -163,22 +164,78 @@ class DiscordClient:
             raise RuntimeError(f"Failed to join voice channel {channel_id}.") from exc
 
         self.voice_client = voice_client
+        self._reset_receive_state()
         return voice_client
 
+    async def start_listening(self, sink: AudioSink) -> None:
+        """Start receiving voice packets into the provided sink."""
+        voice_client = self._require_voice_client()
+        if voice_client.is_listening():
+            raise RuntimeError("Discord voice receive is already active.")
+
+        if self._receive_done_future is not None and not self._receive_done_future.done():
+            raise RuntimeError("Discord voice receive shutdown is already in progress.")
+
+        loop = asyncio.get_running_loop()
+        self._receive_done_future = loop.create_future()
+        self._receive_shutdown_error = None
+
+        def after(error: Exception | None) -> None:
+            loop.call_soon_threadsafe(self._finalize_receive_shutdown, error)
+
+        try:
+            voice_client.listen(sink, after=after)
+        except Exception as exc:
+            self._reset_receive_state()
+            raise RuntimeError("Failed to start voice receive.") from exc
+
+    async def stop_listening(self) -> None:
+        """Stop the active receive session and wait for cleanup to finish."""
+        voice_client = self._require_voice_client()
+
+        if not voice_client.is_listening():
+            if self._receive_done_future is None:
+                return
+        else:
+            if self._receive_done_future is None:
+                self._receive_done_future = asyncio.get_running_loop().create_future()
+            voice_client.stop_listening()
+
+        await self._receive_done_future
+        error = self._receive_shutdown_error
+        self._reset_receive_state()
+
+        if error is not None:
+            raise RuntimeError("Voice receive stopped with an error.") from error
+
+    def is_listening(self) -> bool:
+        """Return whether the active voice client is currently receiving audio."""
+        return self.voice_client is not None and self.voice_client.is_listening()
+
     async def leave_voice_channel(self) -> None:
-        """Leave current voice channel."""
+        """Leave the current voice channel, stopping receive first if needed."""
         if self.voice_client is None:
             return
 
         logger.info("Leaving voice channel...")
+        receive_error: Exception | None = None
         try:
             if self.voice_client.is_connected():
+                if self.voice_client.is_listening():
+                    try:
+                        await self.stop_listening()
+                    except Exception as exc:
+                        receive_error = exc
                 await self.voice_client.disconnect(force=True)
         finally:
             self.voice_client = None
+            self._reset_receive_state()
+
+        if receive_error is not None:
+            raise receive_error
 
     async def disconnect(self) -> None:
-        """Disconnect from Discord."""
+        """Disconnect from Discord gateway and active voice state."""
         logger.info("Disconnecting from Discord...")
 
         await self.leave_voice_channel()
