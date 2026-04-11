@@ -5,7 +5,7 @@ A sophisticated Discord voice-channel conversational bot with a Textual TUI. The
 ## Features
 
 - **Voice Integration**: Joins Discord voice channels via discord.py with DAVE encryption support
-- **Real-time Transcription**: Per-user speech-to-text via Google Cloud Speech-to-Text (multi-language: Danish + English)
+- **Real-time Transcription**: Per-user speech-to-text via Google Cloud Speech-to-Text
 - **Conversational AI**: Multi-turn chat sessions with Google GenAI (Gemini) that maintain conversation context
 - **Text-to-Speech**: Natural speech synthesis via ElevenLabs streaming TTS
 - **Smart Reply Triggers**:
