@@ -1,0 +1,138 @@
+"""Reply trigger policy - silence, mentions, and cooldown."""
+
+import logging
+import time
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+
+class TriggerState(Enum):
+    """Bot state machine states."""
+
+    LISTENING = "listening"
+    THINKING = "thinking"
+    SPEAKING = "speaking"
+    MENTION_WAITING = "mention_waiting"
+
+
+class ReplyTriggerPolicy:
+    """
+    Implements bot reply trigger rules:
+    - Default: 5s silence trigger, 3m cooldown
+    - Mention: 30s window, reply on 5s silence or time elapse
+    - Join: Greet immediately
+    - Other User Join: Optional greeting, no trigger
+
+    Phase 4: Conversation policy
+    """
+
+    def __init__(
+        self,
+        silence_timeout_seconds: float = 5.0,
+        cooldown_seconds: float = 180.0,
+        mention_window_seconds: float = 30.0,
+    ) -> None:
+        """
+        Initialize trigger policy with configurable timeouts.
+
+        Args:
+            silence_timeout_seconds: Silence required to trigger
+            cooldown_seconds: Min interval between replies
+            mention_window_seconds: Time to wait after mention
+        """
+        self.silence_timeout_seconds = silence_timeout_seconds
+        self.cooldown_seconds = cooldown_seconds
+        self.mention_window_seconds = mention_window_seconds
+
+        self.state = TriggerState.LISTENING
+        self.last_human_speech_timestamp: float | None = None
+        self.last_bot_reply_timestamp: float | None = None
+        self.mention_detected_timestamp: float | None = None
+        self.bot_nickname: str | None = None
+
+        logger.info(
+            f"ReplyTriggerPolicy initialized: "
+            f"silence={silence_timeout_seconds}s, "
+            f"cooldown={cooldown_seconds}s, "
+            f"mention_window={mention_window_seconds}s"
+        )
+
+    def set_bot_nickname(self, nickname: str) -> None:
+        """Set bot's current nickname for mention detection."""
+        self.bot_nickname = nickname.lower()
+        logger.debug(f"Bot nickname set to: {nickname}")
+
+    def record_human_speech(self) -> None:
+        """Record that human speech was detected."""
+        self.last_human_speech_timestamp = time.time()
+        logger.debug("Human speech detected")
+
+    def record_mention(self) -> None:
+        """Record that bot's nickname was mentioned."""
+        if self.state != TriggerState.MENTION_WAITING:
+            self.mention_detected_timestamp = time.time()
+            self.state = TriggerState.MENTION_WAITING
+            logger.info("Mention detected, entering mention window")
+
+    def record_bot_reply(self) -> None:
+        """Record that bot sent a reply."""
+        self.last_bot_reply_timestamp = time.time()
+        logger.debug("Bot reply recorded, cooldown reset")
+
+    def should_trigger_reply(self, current_time: float | None = None) -> bool:
+        """
+        Determine if bot should generate a reply now.
+
+        Args:
+            current_time: Current timestamp (uses time.time() if not provided)
+
+        Returns:
+            True if trigger conditions met, False otherwise
+        """
+        if current_time is None:
+            current_time = time.time()
+
+        if self.state == TriggerState.MENTION_WAITING and self.mention_detected_timestamp:
+            mention_elapsed = current_time - self.mention_detected_timestamp
+
+            if self.last_human_speech_timestamp:
+                silence_elapsed = current_time - self.last_human_speech_timestamp
+                if silence_elapsed >= self.silence_timeout_seconds:
+                    logger.info("Mention window: silence detected, triggering reply")
+                    return True
+
+            if mention_elapsed >= self.mention_window_seconds:
+                logger.info("Mention window: timeout elapsed, forcing reply")
+                self.state = TriggerState.LISTENING
+                return True
+
+            return False
+
+        if not self.last_human_speech_timestamp:
+            return False
+
+        silence_elapsed = current_time - self.last_human_speech_timestamp
+
+        if silence_elapsed < self.silence_timeout_seconds:
+            return False
+
+        if self.last_bot_reply_timestamp:
+            cooldown_elapsed = current_time - self.last_bot_reply_timestamp
+            if cooldown_elapsed < self.cooldown_seconds:
+                logger.debug(
+                    f"Cooldown active: {cooldown_elapsed:.1f}s / {self.cooldown_seconds}s"
+                )
+                return False
+
+        logger.info(f"Trigger condition met: silence_elapsed={silence_elapsed:.1f}s")
+        return True
+
+    def get_state(self) -> TriggerState:
+        """Get current state machine state."""
+        return self.state
+
+    def set_state(self, state: TriggerState) -> None:
+        """Set state machine state."""
+        self.state = state
+        logger.debug(f"State changed to: {state.value}")
