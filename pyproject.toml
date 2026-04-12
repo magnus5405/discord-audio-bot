@@ -18,7 +18,7 @@ dependencies = [
     "discord.py>=2.7.1",
     # Newer discord.py 2.7+ requires a current voice_recv alpha (older pins need discord.py<2.4).
     "discord-ext-voice-recv>=0.5.2a179",
-    "davey>=0.1.4",
+    "davey>=0.1.5",
     
     # Transcription
     "google-cloud-speech>=2.38.0",
@@ -36,7 +36,7 @@ dependencies = [
     "python-dotenv>=1.2.2",
     
     # Audio processing
-    "PyNaCl>=1.5.0,<1.6",  # Must match discord.py ``[voice]`` extra (``discord-ext-voice-recv`` requires voice)
+    "PyNaCl>=1.6.2,<1.7",  # Must match discord.py ``[voice]`` extra (``discord-ext-voice-recv`` requires voice)
     "pydub>=0.25.1",  # Audio manipulation
     
     # Voice Activity Detection (PyPI: ``webrtcvad``, not ``webrtc-vad``; 2.x is current)
@@ -45,7 +45,7 @@ dependencies = [
     # Utilities
     "pydantic>=2.12.5",  # Data validation
     "httpx>=0.28.1",  # Async HTTP client for ElevenLabs
-    "cryptography>=44.0.0",  # Optional Fernet encryption for secrets in settings.json
+    "cryptography>=46.0.7",  # Optional Fernet encryption for secrets in settings.json
 ]
 
 [project.scripts]
@@ -53,7 +53,7 @@ discord-audio-bot = "src.main:main"
 
 [project.optional-dependencies]
 build = [
-    "pyinstaller>=6.0.0",
+    "pyinstaller>=6.19.0",
 ]
 dev = [
     "pytest>=9.0.3",
