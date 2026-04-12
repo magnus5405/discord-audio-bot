@@ -30,8 +30,10 @@ Tagged releases publish **Windows** artifacts on [GitHub Releases](https://githu
 Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor.
 
 ### MacOS / Linux
-install and run **from source**; follow [Development](#development).
 No official releases for macOS and Linux, but contributions are welcome to implement this.
+
+Install and run **from source**; follow [Development](#development).
+
 
 ### API credentials
 
