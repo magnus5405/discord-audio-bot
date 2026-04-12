@@ -57,6 +57,28 @@ class TranscriptSessionWriter:
         self.segments.append(segment)
         self.write_snapshot()
 
+    def add_bot_reply(self, text: str, *, label: str = "reply") -> None:
+        """Append a bot utterance (e.g. greeting or reply) and persist."""
+        self.bot_replies.append(
+            {
+                "label": label,
+                "text": text,
+                "recorded_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        self.write_snapshot()
+
+    def set_total_tokens(self, total: int) -> None:
+        """Set cumulative GenAI token total for this session snapshot."""
+        self.usage["total_tokens"] = int(total)
+        self.write_snapshot()
+
+    def add_token_usage(self, delta: int) -> None:
+        """Increment cumulative GenAI token counter by ``delta``."""
+        current = int(self.usage.get("total_tokens", 0) or 0)
+        self.usage["total_tokens"] = current + int(delta)
+        self.write_snapshot()
+
     def write_snapshot(self) -> None:
         """Rewrite the session file atomically so partial progress survives crashes."""
         payload = {

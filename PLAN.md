@@ -121,7 +121,7 @@ Practical implications for your “minutes generated” and “low latency” go
 
 You want a TUI that:
 
-- Shows running status, token totals, voice minutes.  
+- Shows running status, speech-to-text minutes, token totals,  voice minutes.  
 - Offers start/stop.  
 - Lists reachable guilds and voice channels and lets you pick one.  
 - Provides a dropdown for character selection and a settings editor (preferably separate UI).  

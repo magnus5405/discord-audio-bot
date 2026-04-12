@@ -61,6 +61,11 @@ class ConversationLog:
         """Get conversation context to send to GenAI."""
         return self.merge_segments()
 
+    def has_pending_since_bot(self) -> bool:
+        """True if there is final user transcript since the last bot turn."""
+        pending = self.segments[self.last_bot_turn_index :]
+        return any(seg.text.strip() for seg in pending)
+
     def clear_session(self) -> None:
         """Clear all segments and turns for new session."""
         self.segments.clear()
