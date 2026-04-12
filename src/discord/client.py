@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from contextlib import suppress
 from typing import Awaitable, Callable, Optional
 
+from discord.errors import DiscordServerError
 from discord.ext.voice_recv import AudioSink, VoiceRecvClient
 
 import discord
@@ -16,6 +18,32 @@ from .voice_recv_patch import apply_discord_ext_voice_recv_patches
 logger = logging.getLogger(__name__)
 
 ClientFactory = Callable[..., discord.Client]
+
+_GATEWAY_RETRY_ATTEMPTS = 5
+_GATEWAY_RETRY_BASE_SECONDS = 2.0
+
+
+def _transient_gateway_failure(exc: BaseException | None) -> bool:
+    """True when Discord login / gateway may succeed after a short wait (5xx, network blips)."""
+    if exc is None:
+        return False
+    if isinstance(exc, DiscordServerError):
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    try:
+        import aiohttp
+
+        return isinstance(
+            exc,
+            (
+                aiohttp.ClientConnectorError,
+                aiohttp.ClientOSError,
+                aiohttp.ServerDisconnectedError,
+            ),
+        )
+    except ImportError:
+        return False
 
 
 class DiscordClient:
@@ -93,6 +121,33 @@ class DiscordClient:
 
         raise RuntimeError("Discord gateway stopped before becoming ready.")
 
+    async def _cleanup_failed_gateway_startup(self) -> None:
+        """Tear down a failed ``client.start()`` so a retry can run cleanly."""
+        self._ready_event = asyncio.Event()
+        if self._gateway_task is not None:
+            if not self._gateway_task.done():
+                self._gateway_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await self._gateway_task
+            else:
+                with suppress(Exception):
+                    await self._gateway_task
+            self._gateway_task = None
+        if self.client is not None:
+            with suppress(Exception):
+                if not self.client.is_closed():
+                    await self.client.close()
+            self.client = None
+
+    async def _start_gateway_once(self) -> None:
+        self._ready_event = asyncio.Event()
+        self.client = self._create_gateway_client()
+        self._gateway_task = asyncio.create_task(
+            self.client.start(self.token),
+            name="discord-gateway",
+        )
+        await self._wait_until_ready()
+
     def _require_ready_client(self) -> discord.Client:
         if self.client is None or not self.client.is_ready():
             raise RuntimeError("Discord client is not connected.")
@@ -155,7 +210,7 @@ class DiscordClient:
             self._receive_done_future.set_result(None)
 
     async def connect(self) -> None:
-        """Connect the bot to the Discord gateway."""
+        """Connect the bot to the Discord gateway (retries transient 5xx / network errors)."""
         logger.info("Connecting to Discord...")
 
         if self.client is not None and self.client.is_ready():
@@ -166,13 +221,31 @@ class DiscordClient:
             await self._wait_until_ready()
             return
 
-        self._ready_event = asyncio.Event()
-        self.client = self._create_gateway_client()
-        self._gateway_task = asyncio.create_task(
-            self.client.start(self.token),
-            name="discord-gateway",
-        )
-        await self._wait_until_ready()
+        last_error: BaseException | None = None
+        for attempt in range(1, _GATEWAY_RETRY_ATTEMPTS + 1):
+            try:
+                await self._start_gateway_once()
+                return
+            except RuntimeError as exc:
+                last_error = exc
+                cause = exc.__cause__
+                if attempt >= _GATEWAY_RETRY_ATTEMPTS or not _transient_gateway_failure(cause):
+                    raise
+                delay = min(
+                    30.0,
+                    _GATEWAY_RETRY_BASE_SECONDS * (2 ** (attempt - 1)) + random.uniform(0.0, 1.5),
+                )
+                logger.warning(
+                    "Discord gateway failed (attempt %s/%s): %s — retrying in %.1fs",
+                    attempt,
+                    _GATEWAY_RETRY_ATTEMPTS,
+                    cause or exc,
+                    delay,
+                )
+                await self._cleanup_failed_gateway_startup()
+                await asyncio.sleep(delay)
+
+        raise RuntimeError("Discord gateway startup failed after retries.") from last_error
 
     async def get_guilds(self) -> list[discord.Guild]:
         """Return the guilds available from the ready cache."""

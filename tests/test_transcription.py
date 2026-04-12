@@ -21,8 +21,8 @@ from src.transcription.stt import GoogleSTTClient, GoogleSTTV1Client, GoogleSTTV
 
 @pytest.fixture(autouse=True)
 def _isolate_google_stt_from_dotenv(monkeypatch):
-    """GoogleSTTV2Client calls load_dotenv(); repo .env must not override test env."""
-    monkeypatch.setattr("dotenv.load_dotenv", lambda *_a, **_k: True)
+    """Google STT calls load_application_dotenv; patch the bound name so repo .env cannot refill env."""
+    monkeypatch.setattr("src.runtime_dirs.load_application_dotenv", lambda: None)
 
 
 def run_async(awaitable):

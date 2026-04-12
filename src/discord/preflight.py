@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from discord.voice_client import has_nacl
 from discord.voice_state import has_dave
+
+from ..runtime_ffmpeg import resolve_ffmpeg_executable
 
 
 class PreflightError(RuntimeError):
@@ -27,8 +28,10 @@ def validate_voice_runtime(audio_path: Path) -> Path:
     resolved_path = audio_path.expanduser()
     validate_voice_dependencies()
 
-    if shutil.which("ffmpeg") is None:
-        raise PreflightError("FFmpeg was not found on PATH.")
+    try:
+        resolve_ffmpeg_executable()
+    except FileNotFoundError as exc:
+        raise PreflightError(str(exc)) from exc
 
     if not resolved_path.exists():
         raise PreflightError(f"Audio file was not found: {resolved_path}")

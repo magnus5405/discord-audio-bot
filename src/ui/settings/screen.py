@@ -47,6 +47,7 @@ class BotSettingsScreen(Screen[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "dismiss", "Close settings"),
         Binding("o", "ignore_settings_shortcut", show=False, priority=True),
+        Binding("ctrl+s", "save_current_tab", "Save", priority=True),
     ]
 
     def __init__(self, store: SettingsStore) -> None:
@@ -293,6 +294,18 @@ class BotSettingsScreen(Screen[None]):
             return None
         return value
 
+    def _parse_non_negative_float_field(self, field_id: str, label: str) -> float | None:
+        raw_value = self.query_one(field_id, Input).value.strip()
+        try:
+            value = float(raw_value)
+        except ValueError:
+            self.notify(f"{label} must be a valid number.", title="Settings", severity="error")
+            return None
+        if value < 0:
+            self.notify(f"{label} must be zero or greater.", title="Settings", severity="error")
+            return None
+        return value
+
     @on(Select.Changed, "#character_pick")
     def on_character_pick_changed(self, event: Select.Changed) -> None:
         character_id = "" if event.value in (None, Select.BLANK) else str(event.value).strip()
@@ -513,6 +526,22 @@ class BotSettingsScreen(Screen[None]):
 
     def action_ignore_settings_shortcut(self) -> None:
         """Consume the parent dashboard shortcut so Footer doesn't show it here."""
+
+    def action_save_current_tab(self) -> None:
+        tabs = self.query_one("#settings_tabs", TabbedContent)
+        active = tabs.active
+        if active == "tab_characters":
+            self.on_save_character()
+        elif active == "tab_discord":
+            self.on_save_discord()
+        elif active == "tab_speech_to_text":
+            self.on_save_speech_to_text()
+        elif active == "tab_text_to_speech":
+            self.on_save_text_to_speech()
+        elif active == "tab_cooldowns":
+            self.on_save_cooldowns()
+        elif active == "tab_pricing":
+            self.on_save_pricing()
 
 
 PersonaSettingsScreen = BotSettingsScreen

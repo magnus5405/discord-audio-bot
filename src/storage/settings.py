@@ -1,5 +1,6 @@
 """Settings file loading and persistence."""
 
+import copy
 import json
 import logging
 import os
@@ -7,10 +8,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ..models import Persona
+from ..runtime_dirs import app_bundle_dir
+from .settings_crypto import (
+    decrypt_sensitive_blocks,
+    encrypt_sensitive_blocks,
+    require_settings_fernet,
+)
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SETTINGS_PATH = Path("settings.json")
+
+def default_settings_path() -> Path:
+    return app_bundle_dir() / "settings.json"
+
+
 # Used when ``stt.language_code`` is missing or blank (BCP-47).
 DEFAULT_STT_LANGUAGE_CODE = "en-US"
 
@@ -80,7 +91,7 @@ class SettingsStore:
         Args:
             settings_path: Path to settings.json
         """
-        self.settings_path = settings_path or DEFAULT_SETTINGS_PATH
+        self.settings_path = settings_path or default_settings_path()
         self.settings: Dict[str, Any] = {}
         self.personas: List[Persona] = []
 
@@ -94,6 +105,8 @@ class SettingsStore:
         try:
             with open(self.settings_path, "r", encoding="utf-8") as f:
                 self.settings = json.load(f)
+
+            decrypt_sensitive_blocks(self.settings, require_settings_fernet())
 
             personas_data = self.settings.get("personas", [])
             self.personas = [
@@ -110,6 +123,8 @@ class SettingsStore:
 
             logger.info(f"Settings loaded: {len(self.personas)} personas")
             return True
+        except (RuntimeError, ValueError):
+            raise
         except Exception as e:
             logger.error(f"Failed to load settings: {e}", exc_info=True)
             return False
@@ -131,8 +146,11 @@ class SettingsStore:
 
             self.settings["personas"] = personas_data
 
+            to_write = copy.deepcopy(self.settings)
+            encrypt_sensitive_blocks(to_write, require_settings_fernet())
+
             with open(self.settings_path, "w", encoding="utf-8") as f:
-                json.dump(self.settings, f, indent=2, ensure_ascii=False)
+                json.dump(to_write, f, indent=2, ensure_ascii=False)
 
             logger.info(f"Settings saved to {self.settings_path}")
             return True

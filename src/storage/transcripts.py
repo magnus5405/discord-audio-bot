@@ -13,8 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..models import TranscriptSegment
-
-DEFAULT_TRANSCRIPTS_DIR = Path("transcripts")
+from ..runtime_dirs import app_bundle_dir
 
 
 def _sanitize_filename_fragment(value: str) -> str:
@@ -40,7 +39,7 @@ class TranscriptSessionWriter:
         self.guild_name = guild_name
         self.channel_id = channel_id
         self.channel_name = channel_name
-        self.transcripts_dir = transcripts_dir or DEFAULT_TRANSCRIPTS_DIR
+        self.transcripts_dir = transcripts_dir or (app_bundle_dir() / "transcripts")
         self.session_started_at = session_started_at or datetime.now(timezone.utc)
         self.segments: list[TranscriptSegment] = []
         self.bot_replies: list[dict[str, object]] = []

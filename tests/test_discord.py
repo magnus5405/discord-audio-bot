@@ -565,10 +565,13 @@ def test_play_file_creates_ffmpeg_source_and_waits_for_completion(monkeypatch) -
         created_sources: list[object] = []
 
         class FakeFFmpegOpusAudio:
-            def __init__(self, source: str) -> None:
+            def __init__(self, source: str, executable=None, **kwargs) -> None:
                 self.source = source
+                self.executable = executable
                 created_sources.append(self)
 
+        monkeypatch.setattr(playback_module, "resolve_ffmpeg_executable", lambda: r"C:\fake\ffmpeg.exe")
+        monkeypatch.setattr(playback_module, "configure_pydub_once", lambda: None)
         monkeypatch.setattr(playback_module.discord, "FFmpegOpusAudio", FakeFFmpegOpusAudio)
         voice_client = FakePlaybackVoiceClient(auto_finish=True)
         playback_manager = VoicePlaybackManager(voice_client)
@@ -608,10 +611,11 @@ def test_run_receive_smoke_sequences_listen_play_and_resume(monkeypatch) -> None
     async def scenario() -> None:
         FakeSmokeDiscordClient.instances.clear()
         FakeSmokePlaybackManager.instances.clear()
-        monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+        monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
         monkeypatch.setattr(main_module, "configure_logging", lambda: None)
         monkeypatch.setattr(main_module, "DiscordClient", FakeSmokeDiscordClient)
         monkeypatch.setattr(main_module, "VoicePlaybackManager", FakeSmokePlaybackManager)
+        monkeypatch.setattr(main_module, "SettingsStore", FakeSettingsStore)
         monkeypatch.setattr(main_module, "validate_voice_runtime", lambda path: path)
         monkeypatch.setenv("DISCORD_TOKEN", "token123")
 
@@ -656,10 +660,11 @@ def test_run_playback_only_flow_avoids_receive_lifecycle(monkeypatch) -> None:
     async def scenario() -> None:
         FakeSmokeDiscordClient.instances.clear()
         FakeSmokePlaybackManager.instances.clear()
-        monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+        monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
         monkeypatch.setattr(main_module, "configure_logging", lambda: None)
         monkeypatch.setattr(main_module, "DiscordClient", FakeSmokeDiscordClient)
         monkeypatch.setattr(main_module, "VoicePlaybackManager", FakeSmokePlaybackManager)
+        monkeypatch.setattr(main_module, "SettingsStore", FakeSettingsStore)
         monkeypatch.setattr(main_module, "validate_voice_runtime", lambda path: path)
         monkeypatch.setenv("DISCORD_TOKEN", "token123")
 
@@ -680,7 +685,7 @@ def test_run_playback_only_flow_avoids_receive_lifecycle(monkeypatch) -> None:
 
 def test_validate_voice_runtime_checks_audio_file(monkeypatch) -> None:
     """Preflight fails fast when the audio file is missing."""
-    monkeypatch.setattr(preflight_module.shutil, "which", lambda _: "ffmpeg")
+    monkeypatch.setattr(preflight_module, "resolve_ffmpeg_executable", lambda: r"C:\fake\ffmpeg.exe")
     monkeypatch.setattr(preflight_module, "has_nacl", True)
     monkeypatch.setattr(preflight_module, "has_dave", True)
 
@@ -831,7 +836,7 @@ def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -
 
     async def scenario() -> None:
         FakeTranscriptionDiscordClient.instances.clear()
-        monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+        monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
         monkeypatch.setattr(main_module, "configure_logging", lambda: None)
         monkeypatch.setattr(main_module, "DiscordClient", FakeTranscriptionDiscordClient)
         monkeypatch.setattr(main_module, "SettingsStore", FakeSettingsStore)
