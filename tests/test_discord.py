@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,11 +13,13 @@ import pytest
 import src.discord.client as client_module
 import src.discord.playback as playback_module
 import src.discord.preflight as preflight_module
+import src.discord.voice_sink as voice_sink_module
 import src.main as main_module
 from src.discord.client import DiscordClient
 from src.discord.playback import VoicePlaybackManager
 from src.discord.preflight import PreflightError, validate_voice_runtime
 from src.discord.voice_sink import DiscordAudioSink
+from src.models import TranscriptSegment
 
 
 def run_async(awaitable):
@@ -404,6 +408,7 @@ def test_voice_sink_enqueues_pcm_frames_and_tracks_summary() -> None:
         frame = audio_queue.get_nowait()
 
         assert frame.user_id == 123
+        assert frame.username == "Alice"
         assert frame.pcm_bytes == b"hello"
         assert sink.total_frames == 1
         assert sink.total_users == 1
@@ -452,11 +457,104 @@ def test_voice_sink_tracks_speaking_events_in_opus_mode() -> None:
         frame = audio_queue.get_nowait()
 
         assert frame.user_id == 456
+        assert frame.username == "Bob"
         assert frame.pcm_bytes == b"opus-bytes"
         assert sink.total_frames == 1
         assert sink.summary_lines() == ["Bob (456): speaking starts=1, speaking stops=1, audio chunks=1"]
 
     run_async(scenario())
+
+
+def test_voice_sink_can_decode_opus_locally_and_skip_corrupted_packets(monkeypatch) -> None:
+    """Local Opus decode should queue PCM and tolerate one bad packet."""
+
+    async def scenario() -> None:
+        audio_queue: asyncio.Queue = asyncio.Queue()
+        user = SimpleNamespace(id=789, display_name="Cara", name="Cara")
+
+        class FakeOpusError(Exception):
+            pass
+
+        class FakeDecoder:
+            instances: list["FakeDecoder"] = []
+
+            def __init__(self) -> None:
+                self.calls: list[bytes] = []
+                self.__class__.instances.append(self)
+
+            def decode(self, packet: bytes, *, fec: bool) -> bytes:
+                self.calls.append(packet)
+                if packet == b"bad-opus":
+                    raise FakeOpusError("corrupted stream")
+                return b"decoded-pcm"
+
+        monkeypatch.setattr(voice_sink_module, "OpusError", FakeOpusError)
+        monkeypatch.setattr(voice_sink_module, "Decoder", FakeDecoder)
+        sink = DiscordAudioSink(
+            audio_queue=audio_queue,
+            loop=asyncio.get_running_loop(),
+            use_opus=True,
+            decode_opus=True,
+        )
+
+        sink.write(user, SimpleNamespace(packet=SimpleNamespace(ssrc=1001), pcm=b"", opus=b"good-opus"))
+        sink.write(user, SimpleNamespace(packet=SimpleNamespace(ssrc=1001), pcm=b"", opus=b"bad-opus"))
+        sink.write(user, SimpleNamespace(packet=SimpleNamespace(ssrc=1001), pcm=b"", opus=b"good-opus-2"))
+        await asyncio.sleep(0)
+
+        first_frame = audio_queue.get_nowait()
+        second_frame = audio_queue.get_nowait()
+
+        assert first_frame.pcm_bytes == b"decoded-pcm"
+        assert second_frame.pcm_bytes == b"decoded-pcm"
+        assert sink.total_frames == 2
+        assert len(FakeDecoder.instances) == 2
+
+    run_async(scenario())
+
+
+def test_safe_packet_decoder_guard_skips_corrupted_packets(monkeypatch) -> None:
+    """The PacketDecoder guard should swallow OpusError and reset PCM decoding state."""
+
+    class FakeOpusError(Exception):
+        pass
+
+    reset_markers: list[str] = []
+
+    class FakeDecoder:
+        def __init__(self) -> None:
+            reset_markers.append("reset")
+
+    class FakeSink:
+        def wants_opus(self) -> bool:
+            return False
+
+    class FakePacketDecoder:
+        def __init__(self) -> None:
+            self.ssrc = 1234
+            self.sink = FakeSink()
+            self._decoder = "old-decoder"
+            self.calls = 0
+
+        def pop_data(self, *, timeout: float = 0):
+            self.calls += 1
+            if self.calls == 1:
+                raise FakeOpusError("corrupted stream")
+            return {"timeout": timeout}
+
+    monkeypatch.setattr(voice_sink_module, "OpusError", FakeOpusError)
+    monkeypatch.setattr(voice_sink_module, "Decoder", FakeDecoder)
+    voice_sink_module._install_safe_packet_decoder_guard(FakePacketDecoder)
+
+    decoder = FakePacketDecoder()
+
+    assert decoder.pop_data(timeout=0.25) is None
+    assert reset_markers == ["reset"]
+    assert decoder._decoder.__class__ is FakeDecoder
+    assert decoder.pop_data(timeout=0.5) == {"timeout": 0.5}
+
+    voice_sink_module._install_safe_packet_decoder_guard(FakePacketDecoder)
+    assert decoder.pop_data(timeout=1.0) == {"timeout": 1.0}
 
 
 def test_play_file_creates_ffmpeg_source_and_waits_for_completion(monkeypatch) -> None:
@@ -587,3 +685,162 @@ def test_validate_voice_runtime_checks_audio_file(monkeypatch) -> None:
 
     with pytest.raises(PreflightError, match="Audio file was not found"):
         validate_voice_runtime(Path("definitely-missing-audio-file.wav"))
+
+
+def test_configure_logging_suppresses_noisy_voice_recv_loggers(monkeypatch) -> None:
+    """configure_logging should quiet the most spammy discord-ext-voice-recv loggers."""
+    root_logger = logging.getLogger()
+    reader_logger = logging.getLogger("discord.ext.voice_recv.reader")
+    gateway_logger = logging.getLogger("discord.ext.voice_recv.gateway")
+    previous_handlers = list(root_logger.handlers)
+    previous_reader_level = reader_logger.level
+    previous_gateway_level = gateway_logger.level
+
+    monkeypatch.delenv("DEBUG_MODE", raising=False)
+
+    try:
+        root_logger.handlers.clear()
+        main_module.configure_logging()
+
+        assert reader_logger.level == logging.WARNING
+        assert gateway_logger.level == logging.WARNING
+    finally:
+        root_logger.handlers.clear()
+        root_logger.handlers.extend(previous_handlers)
+        reader_logger.setLevel(previous_reader_level)
+        gateway_logger.setLevel(previous_gateway_level)
+
+
+class FakeTranscriptionDiscordClient:
+    """Headless fake client for phase-three transcription orchestration."""
+
+    instances: list["FakeTranscriptionDiscordClient"] = []
+
+    def __init__(self, token: str) -> None:
+        self.token = token
+        self.calls: list[object] = []
+        self._is_listening = False
+        self.voice_client = SimpleNamespace(
+            channel=SimpleNamespace(
+                id=42,
+                name="Lobby",
+                guild=SimpleNamespace(id=7, name="Guild Name"),
+            )
+        )
+        self.__class__.instances.append(self)
+
+    async def connect(self) -> None:
+        self.calls.append("connect")
+
+    async def get_guilds(self) -> list[object]:
+        return []
+
+    async def join_voice_channel(self, channel_id: int) -> object:
+        self.calls.append(("join_voice_channel", channel_id))
+        return self.voice_client
+
+    async def start_listening(self, sink: object) -> None:
+        self.calls.append(("start_listening", sink))
+        self._is_listening = True
+        user = SimpleNamespace(id=123, display_name="Alice", name="Alice")
+        sink.write(user, SimpleNamespace(pcm=b"\x01\x00\x03\x00", opus=b"ignored"))
+
+    async def stop_listening(self) -> None:
+        self.calls.append("stop_listening")
+        self._is_listening = False
+
+    def is_listening(self) -> bool:
+        return self._is_listening
+
+    async def disconnect(self) -> None:
+        self.calls.append("disconnect")
+
+
+class FakeSettingsStore:
+    """Phase-three settings stub."""
+
+    def get_stt_config(self) -> dict[str, object]:
+        return {
+            "language_code": "da-DK",
+            "alternative_language_codes": ["en-US"],
+        }
+
+
+class FakeStreamingSTTClient:
+    """Fake STT client that yields one final transcript per utterance."""
+
+    def __init__(self, primary_language: str, alternative_languages: list[str]) -> None:
+        self.primary_language = primary_language
+        self.alternative_languages = alternative_languages
+
+    async def stream_recognize(
+        self,
+        audio_stream,
+        user_id: int,
+        username: str,
+        sample_rate_hz: int = 48000,
+        utterance_started_at: float | None = None,
+    ):
+        chunks = []
+        async for chunk in audio_stream:
+            chunks.append(chunk)
+
+        if chunks:
+            yield TranscriptSegment(
+                user_id=user_id,
+                username=username,
+                text="hello from phase three",
+                start_ts=utterance_started_at or 0.0,
+                end_ts=(utterance_started_at or 0.0) + 0.25,
+                is_final=True,
+                language_code=self.primary_language,
+            )
+
+
+def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -> None:
+    """The phase-three flow should listen, transcribe, and persist session JSON."""
+
+    async def scenario() -> None:
+        FakeTranscriptionDiscordClient.instances.clear()
+        monkeypatch.setattr(main_module, "load_dotenv", lambda: None)
+        monkeypatch.setattr(main_module, "configure_logging", lambda: None)
+        monkeypatch.setattr(main_module, "DiscordClient", FakeTranscriptionDiscordClient)
+        monkeypatch.setattr(main_module, "SettingsStore", FakeSettingsStore)
+        monkeypatch.setattr(main_module, "GoogleSTTClient", FakeStreamingSTTClient)
+        monkeypatch.setattr(main_module, "validate_voice_dependencies", lambda: None)
+
+        class TmpTranscriptWriter(main_module.TranscriptSessionWriter):
+            def __init__(self, **kwargs):
+                super().__init__(transcripts_dir=tmp_path, **kwargs)
+
+        monkeypatch.setattr(main_module, "TranscriptSessionWriter", TmpTranscriptWriter)
+        monkeypatch.setenv("DISCORD_TOKEN", "token123")
+
+        await main_module.run(
+            [
+                "--channel-id",
+                "42",
+                "--transcribe",
+                "--listen-window-seconds",
+                "0.05",
+            ]
+        )
+
+        fake_client = FakeTranscriptionDiscordClient.instances[-1]
+        transcript_files = list(tmp_path.glob("*.json"))
+
+        assert fake_client.calls[0] == "connect"
+        assert fake_client.calls[1] == ("join_voice_channel", 42)
+        assert fake_client.calls[2][0] == "start_listening"
+        assert fake_client.calls[3] == "stop_listening"
+        assert fake_client.calls[4] == "disconnect"
+        assert transcript_files
+
+        payload = json.loads(transcript_files[0].read_text(encoding="utf-8"))
+        assert payload["guild_id"] == 7
+        assert payload["channel_id"] == 42
+        assert payload["segments"][0]["username"] == "Alice"
+        assert payload["segments"][0]["text"] == "hello from phase three"
+        assert payload["usage"] == {"total_tokens": 0, "tts_seconds_generated": 0.0}
+
+    run_async(scenario())

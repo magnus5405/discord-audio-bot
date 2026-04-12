@@ -9,8 +9,9 @@ class TestAudioFrame:
 
     def test_audio_frame_creation(self):
         """Test creating an AudioFrame."""
-        frame = AudioFrame.new(user_id=12345, pcm_bytes=b"test audio")
+        frame = AudioFrame.new(user_id=12345, username="TestUser", pcm_bytes=b"test audio")
         assert frame.user_id == 12345
+        assert frame.username == "TestUser"
         assert frame.pcm_bytes == b"test audio"
         assert frame.sample_rate_hz == 48000
         assert frame.channels == 2
@@ -21,12 +22,14 @@ class TestAudioFrame:
         pcm_data = b"x" * 1000
         frame = AudioFrame(
             user_id=999,
+            username="CustomUser",
             pcm_bytes=pcm_data,
             sample_rate_hz=16000,
             channels=1,
             timestamp_monotonic=123.45,
         )
         assert frame.user_id == 999
+        assert frame.username == "CustomUser"
         assert frame.sample_rate_hz == 16000
         assert frame.channels == 1
 

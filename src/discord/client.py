@@ -10,6 +10,8 @@ from typing import Callable, Optional
 import discord
 from discord.ext.voice_recv import AudioSink, VoiceRecvClient
 
+from .voice_recv_patch import apply_discord_ext_voice_recv_patches
+
 logger = logging.getLogger(__name__)
 
 ClientFactory = Callable[..., discord.Client]
@@ -37,6 +39,7 @@ class DiscordClient:
         self._gateway_task: Optional[asyncio.Task[None]] = None
         self._receive_done_future: Optional[asyncio.Future[None]] = None
         self._receive_shutdown_error: Optional[Exception] = None
+        apply_discord_ext_voice_recv_patches()
         logger.info("DiscordClient initialized")
 
     def _create_gateway_client(self) -> discord.Client:

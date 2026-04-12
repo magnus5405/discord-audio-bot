@@ -4,15 +4,51 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Optional
 
 import discord
+from discord.opus import Decoder, OpusError
 from discord.ext.voice_recv import AudioSink, VoiceData
+from discord.ext.voice_recv.opus import PacketDecoder
 
 from ..models import AudioFrame
 
 logger = logging.getLogger(__name__)
+
+
+def _install_safe_packet_decoder_guard(packet_decoder_cls: type = PacketDecoder) -> None:
+    """
+    Make discord-ext-voice-recv tolerate corrupted Opus packets in PCM mode.
+
+    The library's built-in PCM path already handles jitter buffering, packet loss,
+    and FEC. We keep that path for transcription and only guard against
+    `OpusError` so one bad packet does not kill the router thread.
+    """
+    if getattr(packet_decoder_cls.pop_data, "__discord_audio_bot_safe__", False):
+        return
+
+    original_pop_data = packet_decoder_cls.pop_data
+
+    def safe_pop_data(self, *, timeout: float = 0):
+        try:
+            return original_pop_data(self, timeout=timeout)
+        except OpusError:
+            last_error_log = getattr(self, "_discord_audio_bot_last_decode_error", 0.0)
+            now = time.monotonic()
+            if now - last_error_log >= 1.0:
+                logger.warning(
+                    "Skipping corrupted Opus packet for ssrc %s and resetting decoder.",
+                    self.ssrc,
+                )
+                setattr(self, "_discord_audio_bot_last_decode_error", now)
+
+            self._decoder = None if self.sink.wants_opus() else Decoder()
+            return None
+
+    safe_pop_data.__discord_audio_bot_safe__ = True
+    packet_decoder_cls.pop_data = safe_pop_data
 
 
 @dataclass(slots=True)
@@ -30,10 +66,9 @@ class DiscordAudioSink(AudioSink):
     """
     Audio sink for validating Discord voice receive plumbing.
 
-    The phase-two smoke runner defaults to Opus mode because it avoids the
-    extension's PCM decode path, which can fail before we see speaker activity.
-    Phase three can switch back to PCM mode when the transcription pipeline is
-    ready to consume it.
+    The phase-two smoke runner defaults to Opus mode to validate receive without
+    depending on PCM decode. Phase three uses PCM receive so downstream
+    transcription always gets real PCM bytes with user attribution.
     """
 
     def __init__(
@@ -42,17 +77,22 @@ class DiscordAudioSink(AudioSink):
         loop: asyncio.AbstractEventLoop,
         *,
         use_opus: bool = True,
+        decode_opus: bool = False,
     ) -> None:
         """Initialize the sink with a target queue, event loop, and audio mode."""
         super().__init__()
         self.audio_queue = audio_queue
         self.loop = loop
         self.use_opus = use_opus
+        self.decode_opus = decode_opus
         self._closed = False
         self._queue_full_logged = False
         self._user_stats: dict[int, ReceivedUserStats] = {}
+        self._decoders: dict[int, Decoder] = {}
+        _install_safe_packet_decoder_guard()
         mode = "Opus" if use_opus else "PCM"
-        logger.info("DiscordAudioSink initialized in %s mode", mode)
+        decode_mode = " with local decode" if decode_opus else ""
+        logger.info("DiscordAudioSink initialized in %s mode%s", mode, decode_mode)
 
     def wants_opus(self) -> bool:
         """Tell discord-ext-voice-recv whether this sink wants raw Opus packets."""
@@ -63,8 +103,8 @@ class DiscordAudioSink(AudioSink):
         if self._closed or user is None:
             return
 
-        audio_bytes = data.opus if self.use_opus else data.pcm
-        if not audio_bytes:
+        packet_bytes = data.opus if self.use_opus else data.pcm
+        if not packet_bytes:
             return
 
         stats = self._ensure_user_stats(user)
@@ -72,8 +112,18 @@ class DiscordAudioSink(AudioSink):
             chunk_label = "Opus packet" if self.use_opus else "PCM frame"
             logger.info("First %s received from %s (%s)", chunk_label, stats.display_name, stats.user_id)
 
+        audio_bytes = packet_bytes
+        if self.decode_opus:
+            audio_bytes = self._decode_opus_packet(data, user.id, packet_bytes)
+            if not audio_bytes:
+                return
+
         stats.audio_chunk_count += 1
-        frame = AudioFrame.new(user_id=user.id, pcm_bytes=audio_bytes)
+        frame = AudioFrame.new(
+            user_id=user.id,
+            username=stats.display_name,
+            pcm_bytes=audio_bytes,
+        )
 
         try:
             self.loop.call_soon_threadsafe(self._enqueue_frame, frame)
@@ -106,6 +156,7 @@ class DiscordAudioSink(AudioSink):
             return
 
         self._closed = True
+        self._decoders.clear()
         logger.debug("DiscordAudioSink cleanup complete")
 
     @property
@@ -155,3 +206,27 @@ class DiscordAudioSink(AudioSink):
             if not self._queue_full_logged:
                 self._queue_full_logged = True
                 logger.warning("Audio queue is full; dropping received frames.")
+
+    def _decode_opus_packet(
+        self,
+        data: VoiceData,
+        user_id: int,
+        packet_bytes: bytes,
+    ) -> bytes | None:
+        """Decode one Opus packet locally and tolerate decoder corruption."""
+        decoder_key = getattr(getattr(data, "packet", None), "ssrc", None) or user_id
+        decoder = self._decoders.get(decoder_key)
+        if decoder is None:
+            decoder = Decoder()
+            self._decoders[decoder_key] = decoder
+
+        try:
+            return decoder.decode(packet_bytes, fec=False)
+        except OpusError:
+            logger.warning(
+                "Skipping corrupted Opus packet for user %s on stream %s and resetting decoder.",
+                user_id,
+                decoder_key,
+            )
+            self._decoders[decoder_key] = Decoder()
+            return None

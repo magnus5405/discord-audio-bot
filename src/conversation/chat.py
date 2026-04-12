@@ -1,5 +1,6 @@
 """GenAI chat session management."""
 
+import os
 import logging
 from typing import Optional
 
@@ -25,8 +26,10 @@ class GenAIChatManager:
         Initialize GenAI client.
 
         Args:
-            api_key: Google API key (optional, reads from env if not provided)
+            api_key: Gemini API key (optional, reads GOOGLE_GEMINI_API_KEY if
+                not provided)
         """
+        api_key = api_key or os.getenv("GOOGLE_GEMINI_API_KEY")
         genai.configure(api_key=api_key)
         self.chat = None
         self.current_persona: Optional[Persona] = None
