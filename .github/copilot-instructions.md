@@ -99,4 +99,4 @@ Session JSON under `transcripts/` helps debug STT and conversation output.
 
 ## Authoritative docs
 
-Use [README.md](../README.md) and [QUICKSTART.md](../QUICKSTART.md) plus the source tree above. When a suggestion conflicts with implemented resolution order or voice lifecycle, **prefer the code in `src/storage/settings.py` and `src/discord/`**.
+Use [README.md](../README.md) plus the source tree above. When a suggestion conflicts with implemented resolution order or voice lifecycle, **prefer the code in `src/storage/settings.py` and `src/discord/`**.
