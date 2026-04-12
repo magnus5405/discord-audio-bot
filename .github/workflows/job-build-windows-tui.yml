@@ -1,0 +1,85 @@
+name: Reusable Windows TUI build
+
+on:
+  workflow_call:
+    secrets:
+      SETTINGS_SECRET_KEY:
+        description: Fernet key (same as local .env) for settings encryption during build validation.
+        required: true
+
+jobs:
+  build-windows-tui:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      deployments: write
+    env:
+      SETTINGS_SECRET_KEY: ${{ secrets.SETTINGS_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub deployment
+        id: deployment
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ github.token }}
+          environment: windows-tui
+          environment-url: https://${{ vars.DOMAIN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project and PyInstaller
+        run: pip install -e ".[build]" --pre
+
+      - name: PyInstaller (onedir, FFmpeg bundled via spec)
+        run: python -m PyInstaller packaging/discord-audio-bot-tui.spec --noconfirm
+
+      - name: Zip portable distribution
+        shell: pwsh
+        run: |
+          $zip = "DiscordAudioBotTUI-windows.zip"
+          if (Test-Path $zip) { Remove-Item $zip }
+          Compress-Archive -Path "dist/DiscordAudioBotTUI" -DestinationPath $zip
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+        shell: cmd
+
+      - name: Compile installer (Inno Setup)
+        shell: cmd
+        run: |
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\DiscordAudioBotTUI.iss
+
+      - name: Stage artifacts at repo root
+        shell: pwsh
+        run: |
+          Copy-Item "build/installer-output/DiscordAudioBotTUI-Setup.exe" "DiscordAudioBotTUI-Setup.exe" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: discord-audio-bot-tui-windows
+          path: |
+            DiscordAudioBotTUI-Setup.exe
+            DiscordAudioBotTUI-windows.zip
+
+      - name: Update deployment status (success)
+        if: success() && steps.deployment.outputs.deployment_id
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: success
+          environment-url: https://${{ vars.DOMAIN }}
+
+      - name: Update deployment status (failure)
+        if: failure() && steps.deployment.outputs.deployment_id
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: failure
+          environment-url: https://${{ vars.DOMAIN }}

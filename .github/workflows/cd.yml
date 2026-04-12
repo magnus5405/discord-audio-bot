@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  deployments: write
+
+jobs:
+  build-windows-tui:
+    uses: ./.github/workflows/job-build-windows-tui.yml
+    secrets: inherit
+
+  publish-github-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-windows-tui
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub deployment
+        id: deployment
+        uses: chrnorm/deployment-action@v2
+        with:
+          token: ${{ github.token }}
+          environment: github-release
+          environment-url: https://${{ vars.DOMAIN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: discord-audio-bot-tui-windows
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DiscordAudioBotTUI-Setup.exe
+            DiscordAudioBotTUI-windows.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update deployment status (success)
+        if: success() && steps.deployment.outputs.deployment_id
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: success
+          environment-url: https://${{ vars.DOMAIN }}
+
+      - name: Update deployment status (failure)
+        if: failure() && steps.deployment.outputs.deployment_id
+        uses: chrnorm/deployment-status@v2
+        with:
+          token: ${{ github.token }}
+          deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+          state: failure
+          environment-url: https://${{ vars.DOMAIN }}
