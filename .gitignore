@@ -66,6 +66,9 @@ service_accounts/
 *.temp
 .ipynb_checkpoints/
 
+# App settings
+settings.json
+
 # OS
 .DS_Store
 Thumbs.db
