@@ -128,7 +128,8 @@ BOT_REPLY_SILENCE_SECONDS=5
 BOT_REPLY_COOLDOWN_SECONDS=180
 BOT_MENTION_WINDOW_SECONDS=30
 BOT_GREET_ON_JOIN=true
-BOT_LANGUAGE=en-US
+# Optional: force GenAI reply language (BCP-47). If unset, replies follow ``stt.language_code`` in settings.json.
+# BOT_REPLY_LANGUAGE=da-DK
 ```
 
 ### 4. Create Initial Settings
@@ -165,7 +166,7 @@ Note: ElevenLabs voice IDs are available in your account. See [supported voices]
 
 ## Running
 
-### Phase 1, Phase 2, and Phase 3 Headless Runner
+### Phase 1, Phase 2, Phase 3, and Phase 4 Headless Runner
 
 ```bash
 python -m src.main --list-voice-channels
@@ -173,6 +174,7 @@ python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-t
 python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3 --receive-smoke
 python -m src.main --channel-id 123456789012345678 --transcribe
 python -m src.main --channel-id 123456789012345678 --transcribe --listen-window-seconds 30
+python -m src.main --channel-id 123456789012345678 --converse --listen-window-seconds 60
 ```
 
 The current headless runner is focused on validating the early voice pipeline before the TUI is wired up. It can:
@@ -181,7 +183,8 @@ The current headless runner is focused on validating the early voice pipeline be
 3. Join a selected voice channel and play a local MP3/WAV clip once
 4. Run a phase-two receive smoke flow that listens, pauses for playback, resumes with a fresh sink, and logs per-user frame summaries
 5. Run a phase-three transcription flow that listens in PCM mode, streams per-user STT, logs final transcript lines, and snapshots session JSON in `transcripts/`
-6. Disconnect cleanly when playback, the smoke flow, or transcription mode completes
+6. Run a phase-four **conversation** flow (`--converse`): same STT pipeline as phase three, plus Google GenAI replies (logged to the console and written under `bot_replies` / `usage` in the session JSON). Spoken ElevenLabs playback is phase five, not wired here yet.
+7. Disconnect cleanly when playback, the smoke flow, transcription mode, or conversation mode completes
 
 If you prefer env fallbacks instead of repeating flags, set `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH`, then run:
 
@@ -212,6 +215,15 @@ The Textual TUI scaffold remains in the repository, but it is still phase-six wo
 - Speech-to-Text language settings come from the `stt` section in `settings.json`, not from `.env`.
 - Speech-to-Text authentication comes from `GOOGLE_STT_API_KEY`.
 - Each final transcript segment is appended to the in-memory conversation log and rewritten into a session file in `transcripts/`.
+- Gemini replies in `--converse` mode use the same primary locale as `stt.language_code` (system instruction + prompt nudge). Set `BOT_REPLY_LANGUAGE` or `BOT_LANGUAGE` in `.env` only if you need to override that tag.
+
+### Phase 4 Workflow
+
+- Run `python -m src.main --channel-id <voice_channel_id> --converse` for open-ended STT plus GenAI replies (Ctrl+C to stop), or add `--listen-window-seconds <seconds>` for a bounded session.
+- Requires `GOOGLE_GEMINI_API_KEY` and at least one persona in `settings.json` (the `ui.last_persona_id` entry selects the default when present).
+- Reply timing follows `.env`: `BOT_REPLY_SILENCE_SECONDS`, `BOT_REPLY_COOLDOWN_SECONDS`, `BOT_MENTION_WINDOW_SECONDS`, and optional `BOT_GREET_ON_JOIN` for the join greeting.
+- Reply **language** follows `stt.language_code` in `settings.json` unless `BOT_REPLY_LANGUAGE` or `BOT_LANGUAGE` is set in `.env`.
+- Replies are logged and stored as text in the session JSON; ElevenLabs voice playback is phase five.
 
 ## Development & Architecture
 

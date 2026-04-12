@@ -1,10 +1,15 @@
 """Tests for conversation module."""
 
+import json
+import time
+from pathlib import Path
+
 import pytest
-from src.conversation import ReplyTriggerPolicy, TriggerState, PersonaManager
+
+from src.conversation import PersonaManager, ReplyTriggerPolicy, TriggerState
 from src.conversation.log import ConversationLog
-from src.models import Persona
-from src.models import TranscriptSegment
+from src.models import Persona, TranscriptSegment
+from src.storage.transcripts import TranscriptSessionWriter
 
 
 class TestReplyTriggerPolicy:
@@ -27,10 +32,69 @@ class TestReplyTriggerPolicy:
         policy = ReplyTriggerPolicy(silence_timeout_seconds=0.1)
         policy.record_human_speech()
 
-        import time
-
         time.sleep(0.2)
-        assert policy.should_trigger_reply() is True
+        assert policy.should_trigger_reply(has_pending_transcript=True) is True
+
+    def test_no_trigger_without_pending_transcript(self):
+        """Silence alone must not fire without user transcript since last bot turn."""
+        policy = ReplyTriggerPolicy(silence_timeout_seconds=0.0, cooldown_seconds=0.0)
+        policy.last_human_speech_timestamp = time.time() - 10.0
+        assert policy.should_trigger_reply(has_pending_transcript=False) is False
+
+    def test_cooldown_blocks_default_path(self):
+        """Default path respects cooldown after a bot reply."""
+        policy = ReplyTriggerPolicy(
+            silence_timeout_seconds=1.0,
+            cooldown_seconds=3600.0,
+            mention_window_seconds=30.0,
+        )
+        now = time.time()
+        policy.last_human_speech_timestamp = now - 10.0
+        policy.last_bot_reply_timestamp = now - 5.0
+        assert policy.should_trigger_reply(current_time=now, has_pending_transcript=True) is False
+
+    def test_first_reply_allowed_without_prior_bot_timestamp(self):
+        """Cooldown check is skipped when the bot has not replied yet."""
+        policy = ReplyTriggerPolicy(
+            silence_timeout_seconds=1.0,
+            cooldown_seconds=3600.0,
+        )
+        now = time.time()
+        policy.last_human_speech_timestamp = now - 10.0
+        policy.last_bot_reply_timestamp = None
+        assert policy.should_trigger_reply(current_time=now, has_pending_transcript=True) is True
+
+    def test_mention_silence_resets_to_listening(self):
+        """After mention-window silence trigger, state returns to LISTENING."""
+        policy = ReplyTriggerPolicy(silence_timeout_seconds=1.0, mention_window_seconds=30.0)
+        now = time.time()
+        policy.state = TriggerState.MENTION_WAITING
+        policy.mention_detected_timestamp = now
+        policy.last_human_speech_timestamp = now - 5.0
+        assert policy.should_trigger_reply(current_time=now, has_pending_transcript=True) is True
+        assert policy.get_state() == TriggerState.LISTENING
+        assert policy.mention_detected_timestamp is None
+
+    def test_mention_timeout_clears_timestamp(self):
+        policy = ReplyTriggerPolicy(
+            silence_timeout_seconds=100.0,
+            mention_window_seconds=10.0,
+        )
+        now = time.time()
+        policy.state = TriggerState.MENTION_WAITING
+        policy.mention_detected_timestamp = now
+        policy.last_human_speech_timestamp = now
+        assert policy.should_trigger_reply(current_time=now + 11.0, has_pending_transcript=True) is True
+        assert policy.get_state() == TriggerState.LISTENING
+        assert policy.mention_detected_timestamp is None
+
+    def test_record_bot_reply_resets_mention_state(self):
+        policy = ReplyTriggerPolicy()
+        policy.state = TriggerState.MENTION_WAITING
+        policy.mention_detected_timestamp = time.time()
+        policy.record_bot_reply()
+        assert policy.get_state() == TriggerState.LISTENING
+        assert policy.mention_detected_timestamp is None
 
 
 class TestPersonaManager:
@@ -142,3 +206,52 @@ class TestConversationLog:
         )
 
         assert log.merge_segments() == "Bob: after"
+
+    def test_has_pending_since_bot(self):
+        log = ConversationLog()
+        assert log.has_pending_since_bot() is False
+        log.add_segment(
+            TranscriptSegment(
+                user_id=1,
+                username="Alice",
+                text="hi",
+                start_ts=1.0,
+                end_ts=2.0,
+                is_final=True,
+            )
+        )
+        assert log.has_pending_since_bot() is True
+        log.add_bot_turn("bot said")
+        assert log.has_pending_since_bot() is False
+
+
+class TestTranscriptSessionWriterExtras:
+    """Transcript JSON helpers used in conversation mode."""
+
+    def test_bot_reply_and_total_tokens(self, tmp_path: Path) -> None:
+        writer = TranscriptSessionWriter(
+            guild_id=1,
+            guild_name="Guild",
+            channel_id=2,
+            channel_name="vc",
+            transcripts_dir=tmp_path,
+        )
+        writer.add_bot_reply("Hello everyone", label="greeting")
+        writer.set_total_tokens(99)
+        payload = json.loads(writer.path.read_text(encoding="utf-8"))
+        assert len(payload["bot_replies"]) == 1
+        assert payload["bot_replies"][0]["label"] == "greeting"
+        assert payload["usage"]["total_tokens"] == 99
+
+    def test_add_token_usage_increments(self, tmp_path: Path) -> None:
+        writer = TranscriptSessionWriter(
+            guild_id=1,
+            guild_name="G",
+            channel_id=2,
+            channel_name="c",
+            transcripts_dir=tmp_path,
+        )
+        writer.add_token_usage(10)
+        writer.add_token_usage(5)
+        payload = json.loads(writer.path.read_text(encoding="utf-8"))
+        assert payload["usage"]["total_tokens"] == 15

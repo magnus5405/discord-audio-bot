@@ -78,20 +78,32 @@ class ReplyTriggerPolicy:
     def record_bot_reply(self) -> None:
         """Record that bot sent a reply."""
         self.last_bot_reply_timestamp = time.time()
+        self.state = TriggerState.LISTENING
+        self.mention_detected_timestamp = None
         logger.debug("Bot reply recorded, cooldown reset")
 
-    def should_trigger_reply(self, current_time: float | None = None) -> bool:
+    def should_trigger_reply(
+        self,
+        current_time: float | None = None,
+        *,
+        has_pending_transcript: bool = True,
+    ) -> bool:
         """
         Determine if bot should generate a reply now.
 
         Args:
             current_time: Current timestamp (uses time.time() if not provided)
+            has_pending_transcript: Require at least one user transcript since the
+                last bot turn (PLAN: silence trigger only with something to reply to)
 
         Returns:
             True if trigger conditions met, False otherwise
         """
         if current_time is None:
             current_time = time.time()
+
+        if not has_pending_transcript:
+            return False
 
         if self.state == TriggerState.MENTION_WAITING and self.mention_detected_timestamp:
             mention_elapsed = current_time - self.mention_detected_timestamp
@@ -100,11 +112,14 @@ class ReplyTriggerPolicy:
                 silence_elapsed = current_time - self.last_human_speech_timestamp
                 if silence_elapsed >= self.silence_timeout_seconds:
                     logger.info("Mention window: silence detected, triggering reply")
+                    self.state = TriggerState.LISTENING
+                    self.mention_detected_timestamp = None
                     return True
 
             if mention_elapsed >= self.mention_window_seconds:
                 logger.info("Mention window: timeout elapsed, forcing reply")
                 self.state = TriggerState.LISTENING
+                self.mention_detected_timestamp = None
                 return True
 
             return False
