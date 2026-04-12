@@ -260,37 +260,9 @@ pip install --upgrade discord.py "PyNaCl>=1.5,<1.6" davey
 
 If `settings.json` has no `stt` block, the app defaults to `en-US` with English alternatives where the code supplies them. Set `stt.language_code` and `stt.alternative_language_codes` for your session ([supported languages](https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages)).
 
-### No overlap while speaking
-
-The bot pauses listening while it plays TTS. Mention detection does not run during playback by design.
-
 ### Session-only memory
 
 Conversation state is not persisted across runs; transcript JSON under `transcripts/` is for debugging and analysis.
-
-## Troubleshooting
-
-### "DAVE library not found"
-
-```bash
-pip install --upgrade discord.py "PyNaCl>=1.5,<1.6" davey
-```
-
-Ensure `PyNaCl` (compatible with `discord.py[voice]`) and `davey` are installed.
-
-### Speech-to-Text errors
-
-Confirm `GOOGLE_STT_API_KEY` (v1) or v2 service account variables match `.env.example`, and that the API is enabled for the GCP project.
-
-### No bot audio
-
-- `ffmpeg -version`
-- ElevenLabs key and persona `elevenlabs_voice_id` in `settings.json`
-- Bot can **Connect** and **Speak** in the voice channel
-
-### Bot not in server
-
-Check token, intents, and OAuth2 scopes when generating the invite link.
 
 ## Contributing
 
