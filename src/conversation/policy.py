@@ -47,7 +47,7 @@ class ReplyTriggerPolicy:
         self.last_human_speech_timestamp: float | None = None
         self.last_bot_reply_timestamp: float | None = None
         self.mention_detected_timestamp: float | None = None
-        self.bot_nickname: str | None = None
+        self.mention_triggers: list[str] = []
 
         logger.info(
             f"ReplyTriggerPolicy initialized: "
@@ -56,10 +56,25 @@ class ReplyTriggerPolicy:
             f"mention_window={mention_window_seconds}s"
         )
 
-    def set_bot_nickname(self, nickname: str) -> None:
-        """Set bot's current nickname for mention detection."""
-        self.bot_nickname = nickname.lower()
-        logger.debug(f"Bot nickname set to: {nickname}")
+    def set_mention_triggers(self, names: list[str]) -> None:
+        """Set lowercase substrings that open the mention window when found in transcript text."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in names:
+            s = str(raw).strip().lower()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+        self.mention_triggers = out
+        logger.debug("Mention triggers set: %s", self.mention_triggers)
+
+    def text_contains_mention_trigger(self, text: str) -> bool:
+        """True if any configured trigger appears as a substring of *text* (case-insensitive)."""
+        if not self.mention_triggers:
+            return False
+        low = text.lower()
+        return any(t in low for t in self.mention_triggers)
 
     def record_human_speech(self) -> None:
         """Record that human speech was detected."""

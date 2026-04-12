@@ -37,6 +37,26 @@ def _clean_optional_text(value: Any) -> str:
     return str(value).strip().strip('"').strip("'")
 
 
+def _normalized_alternative_names(raw: Any) -> List[str]:
+    """Build a list of non-empty alias strings from JSON (order preserved, deduped case-insensitively)."""
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    out: List[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        cleaned = repair_utf8_mojibake(item).strip()
+        if not cleaned:
+            continue
+        key = cleaned.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(cleaned)
+    return out
+
+
 def _set_clean_optional_text(mapping: Dict[str, Any], key: str, value: Any) -> None:
     """Write a trimmed optional string, deleting the key when the value is blank."""
     cleaned = _clean_optional_text(value)
@@ -83,6 +103,7 @@ class SettingsStore:
                     system_instruction=repair_utf8_mojibake(str(p["system_instruction"])),
                     genai_model=p["genai_model"],
                     elevenlabs_voice_id=p["elevenlabs_voice_id"],
+                    alternative_names=_normalized_alternative_names(p.get("alternative_names")),
                 )
                 for p in personas_data
             ]
@@ -103,6 +124,7 @@ class SettingsStore:
                     "system_instruction": p.system_instruction,
                     "genai_model": p.genai_model,
                     "elevenlabs_voice_id": p.elevenlabs_voice_id,
+                    "alternative_names": list(p.alternative_names),
                 }
                 for p in self.personas
             ]
@@ -445,13 +467,19 @@ class SettingsStore:
         """USD rate card for live session cost estimates (merged with defaults)."""
         defaults: Dict[str, float] = {
             "elevenlabs_usd_per_1k_characters": 0.1,
-            "genai_usd_per_1M_input_tokens": 0.25,
-            "genai_usd_per_1M_output_tokens": 1.5,
+            "genai_usd_per_1m_input_tokens": 0.25,
+            "genai_usd_per_1m_output_tokens": 1.5,
             "google_stt_usd_per_minute": 0.016,
         }
         stored = self.settings.get("pricing")
         if not isinstance(stored, dict):
             return dict(defaults)
+        # Older builds used a typo key (1M vs 1m); merge using canonical names.
+        stored = dict(stored)
+        if "genai_usd_per_1m_input_tokens" not in stored and "genai_usd_per_1M_input_tokens" in stored:
+            stored["genai_usd_per_1m_input_tokens"] = stored.get("genai_usd_per_1M_input_tokens")
+        if "genai_usd_per_1m_output_tokens" not in stored and "genai_usd_per_1M_output_tokens" in stored:
+            stored["genai_usd_per_1m_output_tokens"] = stored.get("genai_usd_per_1M_output_tokens")
         merged = dict(defaults)
         for key in defaults:
             raw_value = stored.get(key)

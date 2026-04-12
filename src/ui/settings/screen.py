@@ -31,6 +31,7 @@ from .page import (
     SpeechToTextSettingsPage,
     TextToSpeechSettingsPage,
 )
+from .page.characters import CharacterAliasRow
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +166,31 @@ class BotSettingsScreen(Screen[None]):
         self.query_one("#character_name", Input).value = persona.display_name
         self.query_one("#character_voice_id", Input).value = persona.elevenlabs_voice_id
         self.query_one("#character_instructions", TextArea).text = persona.system_instruction
+        self._clear_character_aliases()
+        for alias in persona.alternative_names:
+            self._append_character_alias_row(alias)
+
+    def _clear_character_aliases(self) -> None:
+        container = self.query_one("#character_aliases", Vertical)
+        for child in list(container.children):
+            child.remove()
+
+    def _append_character_alias_row(self, value: str = "") -> None:
+        self.query_one("#character_aliases", Vertical).mount(CharacterAliasRow(value))
+
+    def _collect_character_aliases(self) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for row in self.query(CharacterAliasRow):
+            raw = row.alias_value()
+            if not raw:
+                continue
+            key = raw.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(raw)
+        return out
 
     def _load_discord_fields(self) -> None:
         self.query_one("#discord_token", Input).value = (
@@ -281,6 +307,10 @@ class BotSettingsScreen(Screen[None]):
         backend = backend or "v1"
         self._sync_stt_backend_visibility(backend)
 
+    @on(Button.Pressed, "#btn_add_character_alias")
+    def on_add_character_alias(self) -> None:
+        self._append_character_alias_row()
+
     @on(Button.Pressed, "#btn_add_character")
     def on_add_character(self) -> None:
         new_id = f"character_{len(self.store.get_personalities()) + 1}"
@@ -291,6 +321,7 @@ class BotSettingsScreen(Screen[None]):
                 system_instruction="You are a helpful voice assistant. Keep replies short.",
                 genai_model=_DEFAULT_CHARACTER_MODEL,
                 elevenlabs_voice_id="",
+                alternative_names=[],
             )
         )
         self.store.save()
@@ -336,6 +367,7 @@ class BotSettingsScreen(Screen[None]):
             system_instruction=instructions,
             genai_model=model,
             elevenlabs_voice_id=voice_id,
+            alternative_names=self._collect_character_aliases(),
         )
         others = [
             existing

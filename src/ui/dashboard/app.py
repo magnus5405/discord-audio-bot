@@ -11,7 +11,7 @@ from typing import ClassVar
 
 from textual import on
 from textual.app import App, ComposeResult
-from textual.widgets import Button, DataTable, Footer, Header, Log, Select, Static
+from textual.widgets import Button, DataTable, Footer, Header, Log, RichLog, Select, Static
 
 from src.discord import DiscordClient
 from src.main import (
@@ -35,7 +35,7 @@ from .formatting import (
     format_eleven_chars_with_price,
     format_genai_tokens_with_price,
     format_mention_tile,
-    format_session_timer_with_total,
+    format_session_timer,
     format_stt_minutes_with_price,
 )
 from .layout import DASHBOARD_CSS, compose_dashboard_layout
@@ -140,10 +140,11 @@ class BotDashboardApp(App[None]):
         if snapshot == self._transcript_snapshot:
             return
         self._transcript_snapshot = snapshot
-        log = self.query_one("#transcript_log", Log)
+        log = self.query_one("#transcript_log", RichLog)
         log.clear()
-        if snapshot:
-            log.write_lines(list(snapshot))
+        for line in snapshot:
+            log.write(line)
+        log.scroll_end(animate=False)
 
     def _loading(self) -> bool:
         if self._refreshing:
@@ -303,7 +304,7 @@ class BotDashboardApp(App[None]):
             eleven_usd = (metrics.tts_characters / 1000.0) * rates["elevenlabs_usd_per_1k_characters"]
             total_est = stt_usd + gen_usd + eleven_usd
             self.query_one("#dash_session_timer", MetricTile).set_value(
-                format_session_timer_with_total(metrics.session_duration_seconds(), total_est)
+                format_session_timer(metrics.session_duration_seconds())
             )
             self.query_one("#dash_stt_minutes", MetricTile).set_value(
                 format_stt_minutes_with_price(stt_minutes, rates["google_stt_usd_per_minute"])
@@ -459,7 +460,7 @@ class BotDashboardApp(App[None]):
         self._show_session_dashboard(True)
         self.query_one("#transcript_wrap").display = True
         self._transcript_snapshot = ()
-        self.query_one("#transcript_log", Log).clear()
+        self.query_one("#transcript_log", RichLog).clear()
         self.query_one("#persona_select", Select).disabled = True
         self._metrics = SessionMetrics()
         self._session_task = asyncio.create_task(

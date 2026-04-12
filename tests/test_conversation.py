@@ -94,6 +94,19 @@ class TestReplyTriggerPolicy:
         assert policy.get_state() == TriggerState.LISTENING
         assert policy.mention_detected_timestamp is None
 
+    def test_multi_mention_trigger_substring(self):
+        policy = ReplyTriggerPolicy()
+        policy.set_mention_triggers(["L.O.C", "loc", "Liam"])
+        assert policy.text_contains_mention_trigger("hey loc?")
+        assert policy.text_contains_mention_trigger("Hvad så, LOC?")
+        assert policy.text_contains_mention_trigger("talk to liam now")
+        assert not policy.text_contains_mention_trigger("no match here")
+
+    def test_set_mention_triggers_dedupes_case_insensitive(self):
+        policy = ReplyTriggerPolicy()
+        policy.set_mention_triggers(["Loc", "LOC", "loc"])
+        assert policy.mention_triggers == ["loc"]
+
 
 class TestPersonaManager:
     """Test persona management."""
