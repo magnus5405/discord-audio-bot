@@ -2,12 +2,18 @@ name: Integration
 
 on:
   push:
-    branches: [main, master, latest]
+    branches: [main]
     paths-ignore:
       - '**/*.md'
   pull_request:
     paths-ignore:
       - '**/*.md'
+
+# Same commit often triggers both push (e.g. to main) and pull_request (e.g. main → latest).
+# Key by PR head SHA when applicable, else the pushed commit, so overlapping runs cancel.
+concurrency:
+  group: integration-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
