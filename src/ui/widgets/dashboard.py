@@ -34,12 +34,6 @@ class MetricTile(Static):
 class SessionTimerTile(MetricTile):
     """Elapsed time since session start."""
 
-    DEFAULT_CSS = """
-    SessionTimerTile {
-        min-height: 5;
-    }
-    """
-
     def __init__(self) -> None:
         super().__init__(tile_id="dash_session_timer", label="Running")
 

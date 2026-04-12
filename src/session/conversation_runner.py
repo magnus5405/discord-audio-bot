@@ -12,6 +12,7 @@ from typing import cast
 from pydub import AudioSegment
 
 import discord
+from rich.markup import escape
 
 from ..conversation import (
     ConversationLog,
@@ -28,6 +29,39 @@ from ..tts import ElevenLabsTTSClient
 from .metrics import SessionMetrics
 
 logger = logging.getLogger(__name__)
+
+_DISCORD_NICKNAME_MAX_LEN = 32
+
+
+def _persona_mention_trigger_sources(persona: Persona) -> list[str]:
+    """Display name plus configured transcript aliases (order preserved for policy dedupe)."""
+    parts: list[str] = [persona.display_name, *persona.alternative_names]
+    return [p for p in parts if str(p).strip()]
+
+
+async def _try_set_guild_nickname(channel: object | None, display_name: str) -> None:
+    """Set the bot's server nickname from settings; non-fatal on permission errors."""
+    if channel is None:
+        return
+    g = getattr(channel, "guild", None)
+    if g is None:
+        return
+    me = g.me
+    if me is None:
+        return
+    nick = (display_name or "").strip()[:_DISCORD_NICKNAME_MAX_LEN]
+    if not nick:
+        return
+    try:
+        await me.edit(nick=nick)
+        logger.info("Set guild nickname to %r", nick)
+    except discord.Forbidden:
+        logger.warning(
+            "Could not set guild nickname to %r (missing Change Nickname permission).",
+            nick,
+        )
+    except discord.HTTPException as exc:
+        logger.warning("Guild nickname update failed: %s", exc)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,13 +154,7 @@ async def run_voice_conversation(
         cooldown_seconds=runner_config.reply_cooldown_seconds,
         mention_window_seconds=runner_config.mention_window_seconds,
     )
-
-    me = getattr(guild, "me", None)
-    if me is not None:
-        policy.set_bot_nickname(me.display_name or me.name)
-    elif discord_client.client and discord_client.client.user:
-        u = discord_client.client.user
-        policy.set_bot_nickname(u.display_name or u.name)
+    policy.set_mention_triggers(_persona_mention_trigger_sources(persona))
 
     conversation_log = ConversationLog()
     stt_config = settings_store.get_stt_config()
@@ -145,6 +173,8 @@ async def run_voice_conversation(
         speech_backend=settings_store.resolve_stt_speech_backend(),
     )
     await stt_client.validate_connectivity()
+
+    await _try_set_guild_nickname(channel, persona.display_name)
 
     transcript_writer = TranscriptSessionWriter(
         guild_id=getattr(guild, "id", 0),
@@ -170,7 +200,7 @@ async def run_voice_conversation(
             logger.info("Skipping TTS for empty bot text.")
             return
         if metrics is not None:
-            metrics.append_transcript_line(f"Bot: {stripped}")
+            metrics.append_transcript_line(f"[b]Bot[/b]: {escape(stripped)}")
         if metrics is not None:
             metrics.status_line = "synthesizing speech"
         audio_path = await tts_client.synthesize_to_file(stripped, active_persona)
@@ -199,12 +229,13 @@ async def run_voice_conversation(
         conversation_log.add_segment(segment)
         transcript_writer.add_segment(segment)
         policy.record_human_speech()
-        nick = policy.bot_nickname
-        if nick and nick in segment.text.lower():
+        if policy.text_contains_mention_trigger(segment.text):
             policy.record_mention()
         if metrics is not None:
             metrics.status_line = f"transcript: {segment.username}"
-            metrics.append_transcript_line(f"{segment.username}: {segment.text}")
+            metrics.append_transcript_line(
+                f"[b]{escape(segment.username)}[/b]: {escape(segment.text)}"
+            )
         logger.info("Final transcript | %s: %s", segment.username, segment.text)
 
     def on_stt_audio_seconds(delta: float) -> None:

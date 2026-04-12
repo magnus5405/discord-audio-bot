@@ -34,6 +34,19 @@ def test_resolve_pricing_config_settings_override_env(
     assert p["genai_usd_per_1m_output_tokens"] == pytest.approx(2.0)
 
 
+def test_get_pricing_config_accepts_legacy_genai_key_casing(tmp_path: Path) -> None:
+    """Regression: defaults once used ``1M`` keys; UI expects ``1m`` keys."""
+    path = tmp_path / "settings.json"
+    path.write_text(
+        '{"pricing": {"genai_usd_per_1M_input_tokens": 0.4, "genai_usd_per_1M_output_tokens": 2.0}}',
+        encoding="utf-8",
+    )
+    store = SettingsStore(settings_path=path)
+    p = store.get_pricing_config()
+    assert p["genai_usd_per_1m_input_tokens"] == pytest.approx(0.4)
+    assert p["genai_usd_per_1m_output_tokens"] == pytest.approx(2.0)
+
+
 def test_resolve_pricing_config_env_when_missing_in_settings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

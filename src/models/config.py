@@ -13,6 +13,7 @@ class Persona:
     system_instruction: str
     genai_model: str
     elevenlabs_voice_id: str
+    alternative_names: list[str] = field(default_factory=list)
 
 
 @dataclass

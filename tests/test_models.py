@@ -1,6 +1,10 @@
 """Tests for core data models."""
 
+import json
+from pathlib import Path
+
 from src.models import AudioFrame, Persona, TranscriptSegment, UsageCounters
+from src.storage.settings import SettingsStore
 
 
 class TestAudioFrame:
@@ -67,6 +71,43 @@ class TestPersona:
         )
         assert persona.persona_id == "friendly"
         assert persona.display_name == "Friendly Bot"
+        assert persona.alternative_names == []
+
+    def test_persona_alternative_names(self):
+        persona = Persona(
+            persona_id="friendly",
+            display_name="L.O.C",
+            system_instruction="Be brief",
+            genai_model="gemini-2.5-flash",
+            elevenlabs_voice_id="",
+            alternative_names=["loc", "l.o.c"],
+        )
+        assert persona.alternative_names == ["loc", "l.o.c"]
+
+    def test_persona_alternative_names_json_roundtrip(self, tmp_path: Path) -> None:
+        path = tmp_path / "settings.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "personas": [
+                        {
+                            "id": "p1",
+                            "name": "L.O.C",
+                            "system_instruction": "be brief",
+                            "genai_model": "gemini-2.5-flash",
+                            "elevenlabs_voice_id": "",
+                            "alternative_names": ["loc", "LOC", "loc"],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        store = SettingsStore(settings_path=path)
+        assert store.personas[0].alternative_names == ["loc"]
+        store.save()
+        store2 = SettingsStore(settings_path=path)
+        assert store2.personas[0].alternative_names == ["loc"]
 
 
 class TestUsageCounters:

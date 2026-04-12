@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, DataTable, Label, LoadingIndicator, Log, Select, Static
+from textual.widgets import Button, DataTable, Label, LoadingIndicator, Log, RichLog, Select, Static
 
 from src.ui.widgets import (
     CooldownTile,
@@ -136,6 +136,7 @@ Screen {
     height: 12;
     min-height: 4;
     border-top: tall $primary;
+    overflow-x: hidden;
 }
 #event_log_wrap {
     height: auto;
@@ -198,7 +199,13 @@ def compose_dashboard_layout(persona_options: list[tuple[str, str]]) -> ComposeR
                 with Vertical(id="footer_block"):
                     with Vertical(id="transcript_wrap"):
                         yield Label("Live transcript")
-                        yield Log(id="transcript_log", max_lines=200, auto_scroll=True)
+                        yield RichLog(
+                            id="transcript_log",
+                            max_lines=200,
+                            auto_scroll=True,
+                            wrap=True,
+                            markup=True,
+                        )
                     with Vertical(id="event_log_wrap"):
                         yield Label("Activity log")
                         yield Log(id="event_log", max_lines=300, auto_scroll=True)

@@ -7,23 +7,28 @@ Screen {
 #settings_root {
     width: 100%;
     height: 1fr;
+    min-height: 0;
     padding: 0 2 1 2;
 }
 #settings_tabs {
     padding-top: 1;
     height: 1fr;
+    min-height: 0;
 }
 TabPane {
     padding: 0;
     height: 1fr;
+    min-height: 0;
 }
 .settings_page {
     width: 1fr;
     height: 1fr;
+    min-height: 0;
 }
 .settings_scroll {
     width: 1fr;
     height: 1fr;
+    min-height: 0;
     padding: 1 1 0 1;
 }
 .settings_form {
@@ -36,6 +41,33 @@ TabPane {
 }
 .settings_field_group Label {
     margin-bottom: 1;
+}
+.character_aliases_list {
+    width: 1fr;
+    height: auto;
+}
+#character_alias_header_row {
+    height: auto;
+    width: 1fr;
+    align: left top;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+#character_alias_header_row .settings_column {
+    width: 1fr;
+    height: auto;
+}
+.character_alias_header_left Label {
+    margin-bottom: 0;
+    text-align: left;
+    text-style: bold;
+}
+#character_alias_section_title {
+    padding-top: 1;
+}
+.character_alias_header_right {
+    align: right middle;
+    height: auto;
 }
 .settings_toggle_row {
     align: left middle;
@@ -82,6 +114,15 @@ TabPane {
 Input, Select, TextArea {
     width: 100%;
 }
+/* Alias rows: global Input width 100% would hide the Delete button in the Horizontal row. */
+CharacterAliasRow Input.character_alias_input {
+    width: 1fr;
+    min-width: 8;
+}
+CharacterAliasRow Button.btn_remove_alias {
+    width: auto;
+    min-width: 10;
+}
 #character_selector_row {
     height: auto;
     align: center middle;
@@ -114,10 +155,10 @@ Input, Select, TextArea {
 }
 #character_instruction_group {
     height: auto;
-    min-height: 12;
+    min-height: 14;
 }
 #character_instructions {
-    height: 12;
-    min-height: 8;
+    height: 14;
+    min-height: 10;
 }
 """

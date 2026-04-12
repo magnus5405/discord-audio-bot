@@ -28,7 +28,7 @@ def format_genai_tokens_with_price(
     usd_per_1m_output: float,
 ) -> str:
     """Token counts and estimated GenAI spend (input + output)."""
-    usd = (input_tokens / 1000.0) * float(usd_per_1m_input) + (output_tokens / 1000.0) * float(
+    usd = (input_tokens / 1000000.0) * float(usd_per_1m_input) + (output_tokens / 1000000.0) * float(
         usd_per_1m_output
     )
     return f"in {int(input_tokens)} · out {int(output_tokens)} ({format_usd_compact(usd)})"
@@ -40,9 +40,9 @@ def format_eleven_chars_with_price(characters: int, usd_per_1k_chars: float) -> 
     return f"{int(characters)} ({format_usd_compact(usd)})"
 
 
-def format_session_timer_with_total(duration_seconds: float, total_usd: float) -> str:
-    """Session clock plus rough sum of the three API estimates on the dashboard."""
-    return f"{format_duration(duration_seconds)}\n~Total {format_usd_compact(total_usd)}"
+def format_session_timer(duration_seconds: float) -> str:
+    """Session clock on the dashboard."""
+    return f"{format_duration(duration_seconds)}"
 
 
 def format_duration(seconds: float) -> str:
