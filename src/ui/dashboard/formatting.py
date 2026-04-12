@@ -24,12 +24,12 @@ def format_stt_minutes_with_price(minutes: float, usd_per_minute: float) -> str:
 def format_genai_tokens_with_price(
     input_tokens: int,
     output_tokens: int,
-    usd_per_1k_input: float,
-    usd_per_1k_output: float,
+    usd_per_1m_input: float,
+    usd_per_1m_output: float,
 ) -> str:
     """Token counts and estimated GenAI spend (input + output)."""
-    usd = (input_tokens / 1000.0) * float(usd_per_1k_input) + (output_tokens / 1000.0) * float(
-        usd_per_1k_output
+    usd = (input_tokens / 1000.0) * float(usd_per_1m_input) + (output_tokens / 1000.0) * float(
+        usd_per_1m_output
     )
     return f"in {int(input_tokens)} · out {int(output_tokens)} ({format_usd_compact(usd)})"
 

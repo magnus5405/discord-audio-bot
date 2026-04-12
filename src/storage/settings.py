@@ -445,8 +445,8 @@ class SettingsStore:
         """USD rate card for live session cost estimates (merged with defaults)."""
         defaults: Dict[str, float] = {
             "elevenlabs_usd_per_1k_characters": 0.1,
-            "genai_usd_per_1k_input_tokens": 0.25,
-            "genai_usd_per_1k_output_tokens": 1.5,
+            "genai_usd_per_1M_input_tokens": 0.25,
+            "genai_usd_per_1M_output_tokens": 1.5,
             "google_stt_usd_per_minute": 0.016,
         }
         stored = self.settings.get("pricing")
@@ -467,15 +467,15 @@ class SettingsStore:
         self,
         *,
         elevenlabs_usd_per_1k_characters: float,
-        genai_usd_per_1k_input_tokens: float,
-        genai_usd_per_1k_output_tokens: float,
+        genai_usd_per_1m_input_tokens: float,
+        genai_usd_per_1m_output_tokens: float,
         google_stt_usd_per_minute: float,
     ) -> None:
         """Replace the in-memory pricing block (call ``save()`` to write ``settings.json``)."""
         self.settings["pricing"] = {
             "elevenlabs_usd_per_1k_characters": float(elevenlabs_usd_per_1k_characters),
-            "genai_usd_per_1k_input_tokens": float(genai_usd_per_1k_input_tokens),
-            "genai_usd_per_1k_output_tokens": float(genai_usd_per_1k_output_tokens),
+            "genai_usd_per_1m_input_tokens": float(genai_usd_per_1m_input_tokens),
+            "genai_usd_per_1m_output_tokens": float(genai_usd_per_1m_output_tokens),
             "google_stt_usd_per_minute": float(google_stt_usd_per_minute),
         }
         logger.debug("Pricing config updated in memory")
@@ -486,8 +486,8 @@ class SettingsStore:
         raw: Dict[str, Any] = raw_block if isinstance(raw_block, dict) else {}
         specs: list[tuple[str, str, float]] = [
             ("elevenlabs_usd_per_1k_characters", "ELEVENLABS_USD_PER_1K_CHARACTERS", 0.1),
-            ("genai_usd_per_1k_input_tokens", "GENAI_USD_PER_1K_INPUT_TOKENS", 0.25),
-            ("genai_usd_per_1k_output_tokens", "GENAI_USD_PER_1K_OUTPUT_TOKENS", 1.5),
+            ("genai_usd_per_1m_input_tokens", "GENAI_USD_PER_1m_INPUT_TOKENS", 0.25),
+            ("genai_usd_per_1m_output_tokens", "GENAI_USD_PER_1m_OUTPUT_TOKENS", 1.5),
             ("google_stt_usd_per_minute", "GOOGLE_STT_USD_PER_MINUTE", 0.016),
         ]
         resolved: Dict[str, float] = {}
