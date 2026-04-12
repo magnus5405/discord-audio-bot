@@ -25,10 +25,16 @@ class UsageCounters:
     Phase 5: TTS + tracking
     """
 
-    total_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     tts_seconds_generated: float = 0.0
     stt_seconds_processed: float = 0.0
     session_start_time: float = field(default_factory=time.time)
+
+    @property
+    def total_tokens(self) -> int:
+        """Sum of prompt (input) and candidates (output) tokens."""
+        return int(self.input_tokens) + int(self.output_tokens)
 
     @property
     def session_duration_seconds(self) -> float:

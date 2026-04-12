@@ -12,11 +12,12 @@ from dataclasses import dataclass
 
 from ..models import AudioFrame, TranscriptSegment
 from .preprocessing import convert_to_linear16
-from .stt import GoogleSTTClient
+from .stt import GoogleSTTV1Client, GoogleSTTV2Client
 
 logger = logging.getLogger(__name__)
 
 SegmentHandler = Callable[[TranscriptSegment], object]
+SttAudioSecondsHandler = Callable[[float], None]
 
 
 @dataclass(slots=True)
@@ -37,18 +38,20 @@ class PerUserTranscriptionCoordinator:
 
     def __init__(
         self,
-        stt_client: GoogleSTTClient,
+        stt_client: GoogleSTTV1Client | GoogleSTTV2Client,
         segment_handler: SegmentHandler,
         *,
         idle_timeout_seconds: float = 0.5,
         poll_interval_seconds: float = 0.1,
         target_sample_rate_hz: int = 16000,
+        on_stt_audio_seconds: SttAudioSecondsHandler | None = None,
     ) -> None:
         self.stt_client = stt_client
         self.segment_handler = segment_handler
         self.idle_timeout_seconds = idle_timeout_seconds
         self.poll_interval_seconds = poll_interval_seconds
         self.target_sample_rate_hz = target_sample_rate_hz
+        self._on_stt_audio_seconds = on_stt_audio_seconds
         self._active_sessions: dict[int, _UtteranceSession] = {}
         self._all_tasks: set[asyncio.Task[None]] = set()
         self._worker_error: BaseException | None = None
@@ -108,6 +111,10 @@ class PerUserTranscriptionCoordinator:
         )
         if mono_bytes:
             session.audio_queue.put_nowait(mono_bytes)
+            if self._on_stt_audio_seconds is not None:
+                delta = len(mono_bytes) / (2.0 * float(self.target_sample_rate_hz))
+                if delta > 0:
+                    self._on_stt_audio_seconds(delta)
 
     async def shutdown(self) -> None:
         """Close active STT sessions and wait for all background tasks."""

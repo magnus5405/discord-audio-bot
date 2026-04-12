@@ -107,7 +107,7 @@ class TestPersonaManager:
                 persona_id="test",
                 display_name="Test Persona",
                 system_instruction="Test",
-                genai_model="gemini-2.0-flash",
+                genai_model="gemini-2.5-flash",
                 elevenlabs_voice_id="voice123",
             )
         ]
@@ -120,7 +120,7 @@ class TestPersonaManager:
             persona_id="test",
             display_name="Test",
             system_instruction="Test",
-            genai_model="gemini-2.0-flash",
+            genai_model="gemini-2.5-flash",
             elevenlabs_voice_id="voice123",
         )
         manager = PersonaManager([persona])
@@ -135,14 +135,14 @@ class TestPersonaManager:
                 persona_id="p1",
                 display_name="First",
                 system_instruction="First",
-                genai_model="gemini-2.0-flash",
+                genai_model="gemini-2.5-flash",
                 elevenlabs_voice_id="v1",
             ),
             Persona(
                 persona_id="p2",
                 display_name="Second",
                 system_instruction="Second",
-                genai_model="gemini-2.0-flash",
+                genai_model="gemini-2.5-flash",
                 elevenlabs_voice_id="v2",
             ),
         ]
@@ -242,6 +242,8 @@ class TestTranscriptSessionWriterExtras:
         assert len(payload["bot_replies"]) == 1
         assert payload["bot_replies"][0]["label"] == "greeting"
         assert payload["usage"]["total_tokens"] == 99
+        assert payload["usage"]["genai_input_tokens"] == 99
+        assert payload["usage"]["genai_output_tokens"] == 0
 
     def test_add_token_usage_increments(self, tmp_path: Path) -> None:
         writer = TranscriptSessionWriter(
@@ -255,3 +257,5 @@ class TestTranscriptSessionWriterExtras:
         writer.add_token_usage(5)
         payload = json.loads(writer.path.read_text(encoding="utf-8"))
         assert payload["usage"]["total_tokens"] == 15
+        assert payload["usage"]["genai_input_tokens"] == 0
+        assert payload["usage"]["genai_output_tokens"] == 15

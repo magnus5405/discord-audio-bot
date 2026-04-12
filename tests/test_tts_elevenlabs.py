@@ -18,7 +18,7 @@ def _persona() -> Persona:
         persona_id="p1",
         display_name="Test Persona",
         system_instruction="Be brief.",
-        genai_model="gemini-2.0-flash",
+        genai_model="gemini-2.5-flash",
         elevenlabs_voice_id="voice_test_99",
     )
 
@@ -134,6 +134,26 @@ def test_resolve_elevenlabs_api_key_none_when_unset(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     monkeypatch.delenv("ELEVEN_API_KEY", raising=False)
     assert resolve_elevenlabs_api_key_from_env() is None
+
+
+def test_elevenlabs_client_record_tts_characters() -> None:
+    client = ElevenLabsTTSClient("k", http_transport=None)
+    client.record_tts_characters(50)
+    client.record_tts_characters(25)
+    assert client.total_characters_synthesized == 75
+
+
+def test_transcript_writer_add_tts_characters_accumulates(tmp_path: Path) -> None:
+    writer = TranscriptSessionWriter(
+        guild_id=1,
+        guild_name="g",
+        channel_id=2,
+        channel_name="c",
+        transcripts_dir=tmp_path,
+    )
+    writer.add_tts_characters(120)
+    writer.add_tts_characters(30)
+    assert int(writer.usage["tts_characters"]) == 150
 
 
 def test_transcript_writer_add_tts_seconds_accumulates(tmp_path: Path) -> None:

@@ -58,6 +58,9 @@ apikey.txt
 transcripts/
 *.log
 
+# Google Cloud Service Account Credentials
+service_accounts/
+
 # Temporary files
 *.tmp
 *.temp

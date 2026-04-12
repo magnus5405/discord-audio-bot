@@ -63,7 +63,7 @@ class TestPersona:
             persona_id="friendly",
             display_name="Friendly Bot",
             system_instruction="Be helpful and kind",
-            genai_model="gemini-2.0-flash",
+            genai_model="gemini-2.5-flash",
             elevenlabs_voice_id="EXAVITQu4vr4xnSDxMaL",
         )
         assert persona.persona_id == "friendly"
@@ -76,9 +76,15 @@ class TestUsageCounters:
     def test_counters_initialization(self):
         """Test UsageCounters initialization."""
         counters = UsageCounters()
+        assert counters.input_tokens == 0
+        assert counters.output_tokens == 0
         assert counters.total_tokens == 0
         assert counters.tts_seconds_generated == 0.0
         assert counters.session_duration_seconds > 0
+
+    def test_total_tokens_property(self):
+        counters = UsageCounters(input_tokens=30, output_tokens=12)
+        assert counters.total_tokens == 42
 
     def test_voice_minutes_calculation(self):
         """Test voice_minutes property calculation."""

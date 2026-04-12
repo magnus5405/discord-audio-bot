@@ -4,7 +4,7 @@
       "id": "default",
       "name": "Default Bot",
       "system_instruction": "You are a helpful Discord bot in a voice channel conversation. Be concise (1-2 sentences), friendly, and conversational. Respond naturally to what people say.",
-      "genai_model": "gemini-3.1-flash-lite-preview",
+      "genai_model": "gemini-2.5-flash",
       "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"
     }
   ],
@@ -14,9 +14,8 @@
     "last_persona_id": "default"
   },
   "stt": {
-    "language_code": "da-DK",
+    "language_code": "en-US",
     "alternative_language_codes": [
-      "en-US",
       "en-GB"
     ]
   }
