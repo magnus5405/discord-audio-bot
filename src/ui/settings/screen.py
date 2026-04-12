@@ -251,8 +251,8 @@ class BotSettingsScreen(Screen[None]):
         self.query_one("#pricing_elevenlabs_per_1k_chars", Input).value = str(
             p["elevenlabs_usd_per_1k_characters"]
         )
-        self.query_one("#pricing_genai_input_per_1k", Input).value = str(p["genai_usd_per_1k_input_tokens"])
-        self.query_one("#pricing_genai_output_per_1k", Input).value = str(p["genai_usd_per_1k_output_tokens"])
+        self.query_one("#pricing_genai_input_per_1m", Input).value = str(p["genai_usd_per_1m_input_tokens"])
+        self.query_one("#pricing_genai_output_per_1m", Input).value = str(p["genai_usd_per_1m_output_tokens"])
         self.query_one("#pricing_google_stt_per_minute", Input).value = str(p["google_stt_usd_per_minute"])
 
     def _parse_positive_float_field(self, field_id: str, label: str) -> float | None:
@@ -426,12 +426,12 @@ class BotSettingsScreen(Screen[None]):
             "ElevenLabs USD per 1k characters",
         )
         gin = self._parse_non_negative_float_field(
-            "#pricing_genai_input_per_1k",
-            "GenAI input USD per 1k tokens",
+            "#pricing_genai_input_per_1m",
+            "GenAI input USD per 1m tokens",
         )
         gout = self._parse_non_negative_float_field(
-            "#pricing_genai_output_per_1k",
-            "GenAI output USD per 1k tokens",
+            "#pricing_genai_output_per_1m",
+            "GenAI output USD per 1m tokens",
         )
         stt = self._parse_non_negative_float_field(
             "#pricing_google_stt_per_minute",
@@ -441,8 +441,8 @@ class BotSettingsScreen(Screen[None]):
             return
         self.store.set_pricing_config(
             elevenlabs_usd_per_1k_characters=eleven,
-            genai_usd_per_1k_input_tokens=gin,
-            genai_usd_per_1k_output_tokens=gout,
+            genai_usd_per_1m_input_tokens=gin,
+            genai_usd_per_1m_output_tokens=gout,
             google_stt_usd_per_minute=stt,
         )
         self.store.save()

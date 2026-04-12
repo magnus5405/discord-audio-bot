@@ -297,9 +297,9 @@ class BotDashboardApp(App[None]):
             rates = self._settings_store.resolve_pricing_config()
             stt_minutes = metrics.stt_seconds / 60.0
             stt_usd = stt_minutes * rates["google_stt_usd_per_minute"]
-            gen_usd = (metrics.genai_input_tokens / 1000.0) * rates["genai_usd_per_1k_input_tokens"] + (
-                metrics.genai_output_tokens / 1000.0
-            ) * rates["genai_usd_per_1k_output_tokens"]
+            gen_usd = (metrics.genai_input_tokens / 1000000.0) * rates["genai_usd_per_1m_input_tokens"] + (
+                metrics.genai_output_tokens / 1000000.0
+            ) * rates["genai_usd_per_1m_output_tokens"]
             eleven_usd = (metrics.tts_characters / 1000.0) * rates["elevenlabs_usd_per_1k_characters"]
             total_est = stt_usd + gen_usd + eleven_usd
             self.query_one("#dash_session_timer", MetricTile).set_value(
@@ -312,8 +312,8 @@ class BotDashboardApp(App[None]):
                 format_genai_tokens_with_price(
                     metrics.genai_input_tokens,
                     metrics.genai_output_tokens,
-                    rates["genai_usd_per_1k_input_tokens"],
-                    rates["genai_usd_per_1k_output_tokens"],
+                    rates["genai_usd_per_1m_input_tokens"],
+                    rates["genai_usd_per_1m_output_tokens"],
                 )
             )
             self.query_one("#dash_eleven_chars", MetricTile).set_value(
