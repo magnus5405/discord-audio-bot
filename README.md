@@ -1,5 +1,12 @@
 # Discord Audio Bot
 
+<img width="1068" height="299" alt="image" src="https://github.com/user-attachments/assets/c684ef20-9767-476b-a742-b38ad745823c" />
+
+---
+
+<img width="1069" height="643" alt="image" src="https://github.com/user-attachments/assets/8ae49b3c-69aa-4ada-b594-f3361e9a0327" />
+
+
 A Discord voice-channel conversational bot with a [Textual TUI](https://textual.textualize.io/). The bot joins voice channels, listens to speakers, transcribes speech in real time, maintains multi-turn conversations using [Google GenAI](https://github.com/googleapis/python-genai), and replies with synthesized speech via [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python).
 
 ---
