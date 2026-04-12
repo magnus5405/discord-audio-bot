@@ -24,7 +24,8 @@ cp .env.example .env
 **Required credentials to obtain first:**
 
 - **Discord Bot Token** - [Discord Developer Portal](https://discord.com/developers/applications)
-- **Google API Key** - [Google AI Studio](https://aistudio.google.com/) or Google Cloud Console
+- **Google Gemini API Key** - [Google AI Studio](https://aistudio.google.com/)
+- **Google Speech-to-Text API Key** - from Google Cloud Console credentials
 - **ElevenLabs API Key** - [ElevenLabs](https://elevenlabs.io/)
 
 See [README.md](README.md) for detailed setup instructions for each service.
@@ -102,11 +103,11 @@ pip install 'discord.py[voice]' --upgrade
 ```
 
 ### Google Cloud credential issues?
-Verify GOOGLE_APPLICATION_CREDENTIALS environment variable points to a valid service account JSON file.
+Verify `GOOGLE_STT_API_KEY` in `.env` is set and that the Speech-to-Text API is enabled for that Google Cloud project.
 
 ## Next Steps
 
-1. **Fill in `.env`** with your API credentials
+1. **Fill in `.env`** with your Discord token, Gemini API key, STT API key, and ElevenLabs key
 2. **Review [PLAN.md](PLAN.md)** for architecture details
 3. **Check [README.md](README.md)** for setup specifics per service
 4. **Start implementing Phase 1** - see comments marked "Phase 1" in code

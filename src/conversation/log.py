@@ -1,8 +1,9 @@
 """Conversation log management and merging."""
 
+from __future__ import annotations
+
 import logging
 import time
-from typing import List
 
 from ..models import TranscriptSegment, ConversationTurn
 
@@ -20,15 +21,18 @@ class ConversationLog:
 
     def __init__(self) -> None:
         """Initialize conversation log."""
-        self.segments: List[TranscriptSegment] = []
-        self.turns: List[ConversationTurn] = []
+        self.segments: list[TranscriptSegment] = []
+        self.turns: list[ConversationTurn] = []
         self.last_bot_turn_index: int = 0
         logger.info("ConversationLog initialized")
 
     def add_segment(self, segment: TranscriptSegment) -> None:
         """Add a transcript segment (final transcript only)."""
+        if not segment.is_final or not segment.text.strip():
+            return
+
         self.segments.append(segment)
-        logger.debug(f"Added transcript from {segment.username}: '{segment.text[:50]}...'")
+        logger.debug("Added transcript from %s: '%s...'", segment.username, segment.text[:50])
 
     def merge_segments(self) -> str:
         """
@@ -37,8 +41,12 @@ class ConversationLog:
         Returns:
             Formatted transcript text
         """
-        logger.debug(f"Merging {len(self.segments)} segments")
-        return ""
+        recent_segments = sorted(
+            self.segments[self.last_bot_turn_index :],
+            key=lambda segment: (segment.end_ts, segment.start_ts, segment.user_id),
+        )
+        logger.debug("Merging %s transcript segments since the last bot turn", len(recent_segments))
+        return "\n".join(f"{segment.username}: {segment.text}" for segment in recent_segments)
 
     def add_bot_turn(self, response_text: str) -> None:
         """Record a bot response turn."""
@@ -47,7 +55,7 @@ class ConversationLog:
         )
         self.turns.append(turn)
         self.last_bot_turn_index = len(self.segments)
-        logger.debug(f"Bot turn recorded: '{response_text[:50]}...'")
+        logger.debug("Bot turn recorded: '%s...'", response_text[:50])
 
     def get_conversation_for_prompt(self) -> str:
         """Get conversation context to send to GenAI."""

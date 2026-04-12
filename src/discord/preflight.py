@@ -1,4 +1,4 @@
-"""Runtime checks for Discord voice playback."""
+"""Runtime checks for Discord voice dependencies and playback."""
 
 from __future__ import annotations
 
@@ -13,18 +13,22 @@ class PreflightError(RuntimeError):
     """Raised when a required runtime dependency is missing."""
 
 
-def validate_voice_runtime(audio_path: Path) -> Path:
-    """Validate local dependencies required for phase-one voice playback."""
-    resolved_path = audio_path.expanduser()
-
-    if shutil.which("ffmpeg") is None:
-        raise PreflightError("FFmpeg was not found on PATH.")
-
+def validate_voice_dependencies() -> None:
+    """Validate runtime dependencies required for Discord voice connectivity."""
     if not has_nacl:
         raise PreflightError("PyNaCl is required for Discord voice playback.")
 
     if not has_dave:
         raise PreflightError("The davey package is required for Discord voice playback.")
+
+
+def validate_voice_runtime(audio_path: Path) -> Path:
+    """Validate local dependencies required for phase-one voice playback."""
+    resolved_path = audio_path.expanduser()
+    validate_voice_dependencies()
+
+    if shutil.which("ffmpeg") is None:
+        raise PreflightError("FFmpeg was not found on PATH.")
 
     if not resolved_path.exists():
         raise PreflightError(f"Audio file was not found: {resolved_path}")

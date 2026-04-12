@@ -2,7 +2,9 @@
 
 import pytest
 from src.conversation import ReplyTriggerPolicy, TriggerState, PersonaManager
+from src.conversation.log import ConversationLog
 from src.models import Persona
+from src.models import TranscriptSegment
 
 
 class TestReplyTriggerPolicy:
@@ -83,3 +85,60 @@ class TestPersonaManager:
         manager = PersonaManager(personas)
         manager.set_current_persona("p2")
         assert manager.get_current_persona().persona_id == "p2"
+
+
+class TestConversationLog:
+    """Test transcript merging behavior."""
+
+    def test_merge_segments_orders_by_end_time(self):
+        """Merged transcript text should be ordered deterministically."""
+        log = ConversationLog()
+        log.add_segment(
+            TranscriptSegment(
+                user_id=2,
+                username="Bob",
+                text="second",
+                start_ts=2.0,
+                end_ts=3.0,
+                is_final=True,
+            )
+        )
+        log.add_segment(
+            TranscriptSegment(
+                user_id=1,
+                username="Alice",
+                text="first",
+                start_ts=1.0,
+                end_ts=2.0,
+                is_final=True,
+            )
+        )
+
+        assert log.merge_segments() == "Alice: first\nBob: second"
+
+    def test_merge_segments_only_returns_since_last_bot_turn(self):
+        """Bot turn boundaries should keep older transcript lines out of new prompts."""
+        log = ConversationLog()
+        log.add_segment(
+            TranscriptSegment(
+                user_id=1,
+                username="Alice",
+                text="before",
+                start_ts=1.0,
+                end_ts=2.0,
+                is_final=True,
+            )
+        )
+        log.add_bot_turn("reply")
+        log.add_segment(
+            TranscriptSegment(
+                user_id=2,
+                username="Bob",
+                text="after",
+                start_ts=3.0,
+                end_ts=4.0,
+                is_final=True,
+            )
+        )
+
+        assert log.merge_segments() == "Bob: after"

@@ -69,7 +69,7 @@ pip install -e .
 
 ### 2. Obtain API Credentials
 
-You'll need credentials for three services:
+You'll need credentials for four integrations:
 
 #### Discord Bot Token
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
@@ -81,18 +81,15 @@ You'll need credentials for three services:
    - `GUILDS` (to see server list)
    - Keep `MESSAGE_CONTENT` disabled (the bot doesn't read text messages)
 
-#### Google Cloud Setup
+#### Google Setup
 1. Create a [Google Cloud Project](https://console.cloud.google.com/)
-2. **Option A - Gemini Developer API (Simpler)**:
+2. For **Gemini / Google GenAI**, create a Developer API key:
    - Go to [Google AI Studio](https://aistudio.google.com/) and click "Get API key"
-   - Copy the API key
-3. **Option B - Vertex AI (requires billing)**:
-   - Enable "Vertex AI API" in your Cloud project
-   - Use service account JSON for authentication (see `PLAN.md` for details)
-4. For **Speech-to-Text**, enable "Cloud Speech-to-Text API" and create a service account:
-   - In Cloud Console: **APIs & Services** → **Credentials** → **Create Service Account**
-   - Download JSON key file and save it locally
-   - Set `GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json`
+   - Copy the API key and store it in `GOOGLE_GEMINI_API_KEY`
+3. For **Speech-to-Text**, create a separate Google Cloud API key:
+   - In Cloud Console: **APIs & Services** → **Credentials** → **Create credentials** → **API key**
+   - Make sure the Speech-to-Text API is enabled for the same project
+   - Store the key in `GOOGLE_STT_API_KEY`
 
 #### ElevenLabs API Key
 1. Sign up at [ElevenLabs](https://elevenlabs.io/)
@@ -117,8 +114,11 @@ DISCORD_TOKEN=your_discord_bot_token_here
 # Discord server ID
 DISCORD_SERVER_ID=your_discord_server_id_here
 
-# Google Cloud
-GOOGLE_API_KEY=your_gemini_api_key_here
+# Google Gemini
+GOOGLE_GEMINI_API_KEY=your_gemini_api_key_here
+
+# Google Speech-to-Text
+GOOGLE_STT_API_KEY=your_google_stt_api_key_here
 
 # ElevenLabs
 ELEVENLABS_API_KEY=your_elevenlabs_key_here
@@ -165,12 +165,14 @@ Note: ElevenLabs voice IDs are available in your account. See [supported voices]
 
 ## Running
 
-### Phase 1 and Phase 2 Smoke Runner
+### Phase 1, Phase 2, and Phase 3 Headless Runner
 
 ```bash
 python -m src.main --list-voice-channels
 python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3
 python -m src.main --channel-id 123456789012345678 --audio-path /path/to/local-test-clip.mp3 --receive-smoke
+python -m src.main --channel-id 123456789012345678 --transcribe
+python -m src.main --channel-id 123456789012345678 --transcribe --listen-window-seconds 30
 ```
 
 The current headless runner is focused on validating the early voice pipeline before the TUI is wired up. It can:
@@ -178,7 +180,8 @@ The current headless runner is focused on validating the early voice pipeline be
 2. Connect to Discord and print reachable guild/voice channel IDs
 3. Join a selected voice channel and play a local MP3/WAV clip once
 4. Run a phase-two receive smoke flow that listens, pauses for playback, resumes with a fresh sink, and logs per-user frame summaries
-5. Disconnect cleanly when playback or the smoke flow completes
+5. Run a phase-three transcription flow that listens in PCM mode, streams per-user STT, logs final transcript lines, and snapshots session JSON in `transcripts/`
+6. Disconnect cleanly when playback, the smoke flow, or transcription mode completes
 
 If you prefer env fallbacks instead of repeating flags, set `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH`, then run:
 
@@ -201,6 +204,14 @@ The Textual TUI scaffold remains in the repository, but it is still phase-six wo
 - Run `python -m src.main --channel-id <voice_channel_id> --audio-path <local_mp3_or_wav> --receive-smoke` to validate voice receive around playback.
 - Use `--listen-window-seconds <seconds>` if you want shorter or longer listen windows than the 10 second default.
 - Expect two receive summaries in the logs: one before playback and one after playback resumes with a new sink instance.
+
+### Phase 3 Workflow
+
+- Run `python -m src.main --channel-id <voice_channel_id> --transcribe` to keep listening until you stop the process.
+- Use `--listen-window-seconds <seconds>` with `--transcribe` when you want a bounded transcription session for smoke testing.
+- Speech-to-Text language settings come from the `stt` section in `settings.json`, not from `.env`.
+- Speech-to-Text authentication comes from `GOOGLE_STT_API_KEY`.
+- Each final transcript segment is appended to the in-memory conversation log and rewritten into a session file in `transcripts/`.
 
 ## Development & Architecture
 
@@ -421,7 +432,7 @@ pip install --upgrade discord.py[voice]
 ```
 
 ### Transcription Language
-Default is Danish (`da-DK`) with English alternatives. Modify `BOT_STT_ALTERNATIVE_LANGUAGES` in `.env` to support other languages via [Google Speech-to-Text Codes](https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages).
+Default is Danish (`da-DK`) with English alternatives. Modify the `stt.language_code` and `stt.alternative_language_codes` values in `settings.json` to support other languages via [Google Speech-to-Text Codes](https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages).
 
 ### No Interruptions
 The bot stops listening while it is speaking. This is a by-design feature to avoid concurrent transcription and synthesis issues. You cannot detect "mentions" during bot speech; this is documented as a known limitation.
@@ -440,9 +451,9 @@ pip install --upgrade 'discord.py[voice]'
 ```
 
 ### "Couldn't connect to Google Speech-to-Text"
-Verify `GOOGLE_APPLICATION_CREDENTIALS` points to a valid service account JSON:
+Verify `GOOGLE_STT_API_KEY` is set in `.env` and belongs to a Google Cloud project with the Speech-to-Text API enabled:
 ```bash
-echo $GOOGLE_APPLICATION_CREDENTIALS
+echo $GOOGLE_STT_API_KEY
 ```
 
 ### "No audio from bot"

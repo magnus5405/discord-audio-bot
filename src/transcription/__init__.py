@@ -7,6 +7,7 @@ speech-to-text via Google Cloud.
 from .stt import GoogleSTTClient
 from .preprocessing import convert_to_linear16, to_mono, get_audio_duration
 from .vad import VADProcessor
+from .coordinator import PerUserTranscriptionCoordinator
 
 __all__ = [
     "GoogleSTTClient",
@@ -14,4 +15,5 @@ __all__ = [
     "to_mono",
     "get_audio_duration",
     "VADProcessor",
+    "PerUserTranscriptionCoordinator",
 ]
