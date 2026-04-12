@@ -556,7 +556,13 @@ def test_google_stt_client_falls_back_to_v1_when_only_api_key_no_project(monkeyp
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
 
-    stt_client = GoogleSTTClient(primary_language="da-DK")
+    class FakeV1:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+
+    with patch("src.transcription.stt_v1.speech_v1.SpeechAsyncClient", FakeV1):
+        stt_client = GoogleSTTClient(primary_language="da-DK")
+
     assert isinstance(stt_client, GoogleSTTV1Client)
     assert stt_client.api_key == "key-present"
 
