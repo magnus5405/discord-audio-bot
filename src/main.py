@@ -8,9 +8,11 @@ import logging
 import os
 from contextlib import suppress
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, cast
 
+import discord
 from dotenv import load_dotenv
+from pydub import AudioSegment
 
 from src.conversation import (
     ConversationLog,
@@ -27,6 +29,7 @@ from src.discord.preflight import (
 from src.models import AudioFrame
 from src.storage import SettingsStore, TranscriptSessionWriter
 from src.transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
+from src.tts import ElevenLabsTTSClient, resolve_elevenlabs_api_key_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +77,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--converse",
         action="store_true",
         help=(
-            "Run phase-four transcription plus GenAI replies (logged text only; "
-            "ElevenLabs voice playback is phase five)"
+            "Run transcription plus GenAI replies with ElevenLabs TTS playback "
+            "into the voice channel (full conversational loop)"
         ),
     )
     parser.add_argument(
@@ -96,6 +99,17 @@ def get_required_token() -> str:
         raise ValueError("DISCORD_TOKEN must be set in the environment or .env file.")
 
     return token
+
+
+def get_required_elevenlabs_api_key() -> str:
+    """Load the ElevenLabs API key from the environment (required for --converse)."""
+    key = resolve_elevenlabs_api_key_from_env()
+    if not key:
+        raise ValueError(
+            "Set ELEVENLABS_API_KEY (or alias ELEVEN_API_KEY) in the environment or .env for --converse."
+        )
+
+    return key
 
 
 def resolve_channel_id(cli_value: int | None) -> int:
@@ -384,8 +398,10 @@ async def run_conversation_mode(
     discord_client: DiscordClient,
     voice_client: object,
     listen_window_seconds: float | None,
+    *,
+    elevenlabs_api_key: str,
 ) -> None:
-    """Run phase-four STT plus GenAI reply loop (text replies logged; TTS is phase five)."""
+    """Run STT plus GenAI replies with ElevenLabs TTS and Discord voice playback."""
     settings_store = SettingsStore()
     personas = settings_store.get_personalities()
     if not personas:
@@ -436,6 +452,24 @@ async def run_conversation_mode(
         channel_id=getattr(channel, "id", 0),
         channel_name=getattr(channel, "name", "unknown-channel"),
     )
+    tts_client = ElevenLabsTTSClient(elevenlabs_api_key)
+    playback_manager = VoicePlaybackManager(cast(discord.VoiceClient, voice_client))
+
+    async def speak_bot_text(text: str) -> None:
+        """Synthesize bot text to speech, play into Discord, record TTS duration."""
+        stripped = (text or "").strip()
+        if not stripped:
+            logger.info("Skipping TTS for empty bot text.")
+            return
+        audio_path = await tts_client.synthesize_to_file(stripped, persona)
+        try:
+            await playback_manager.play_file(Path(audio_path))
+            duration_seconds = float(AudioSegment.from_file(audio_path).duration_seconds)
+            tts_client.record_tts_duration(duration_seconds)
+            transcript_writer.add_tts_seconds(duration_seconds)
+        finally:
+            Path(audio_path).unlink(missing_ok=True)
+
     audio_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
 
     def handle_final_segment(segment) -> None:
@@ -476,6 +510,7 @@ async def run_conversation_mode(
         transcript_writer.add_bot_reply(greeting, label="greeting")
         transcript_writer.set_total_tokens(chat_manager.get_token_usage())
         logger.info("Join greeting | %s", greeting)
+        await speak_bot_text(greeting)
 
     sink = DiscordAudioSink(
         audio_queue=audio_queue,
@@ -516,6 +551,7 @@ async def run_conversation_mode(
                     transcript_writer.add_bot_reply(reply, label="reply")
                     transcript_writer.set_total_tokens(chat_manager.get_token_usage())
                     logger.info("Bot reply | %s", reply)
+                    await speak_bot_text(reply)
                 finally:
                     if (
                         supervisor_stop["go"]
@@ -598,6 +634,10 @@ async def run(argv: Sequence[str] | None = None) -> None:
         else:
             audio_path = validate_voice_runtime(resolve_audio_path(args.audio_path))
 
+        converse_elevenlabs_api_key: str | None = None
+        if args.converse:
+            converse_elevenlabs_api_key = get_required_elevenlabs_api_key()
+
         await discord_client.connect()
         voice_client = await discord_client.join_voice_channel(channel_id)
 
@@ -612,10 +652,12 @@ async def run(argv: Sequence[str] | None = None) -> None:
 
         if args.converse:
             listen_window_seconds = resolve_transcription_window_seconds(args.listen_window_seconds)
+            assert converse_elevenlabs_api_key is not None
             await run_conversation_mode(
                 discord_client=discord_client,
                 voice_client=voice_client,
                 listen_window_seconds=listen_window_seconds,
+                elevenlabs_api_key=converse_elevenlabs_api_key,
             )
             return
 
