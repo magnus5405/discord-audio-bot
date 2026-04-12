@@ -12,6 +12,8 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+# Populated by packaging/ensure_ffmpeg_windows.py (FFmpeg exe cache for PyInstaller)
+build/ffmpeg-win-cache/
 .Python
 env/
 venv/
