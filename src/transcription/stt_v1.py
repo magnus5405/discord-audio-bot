@@ -33,12 +33,9 @@ class GoogleSTTV1Client:
         client: speech_v1.SpeechAsyncClient | None = None,
     ) -> None:
         del project_id, location, model
-        try:
-            from dotenv import load_dotenv
+        from src.runtime_dirs import load_application_dotenv
 
-            load_dotenv()
-        except ImportError:
-            pass
+        load_application_dotenv()
         self.primary_language = primary_language
         self.alternative_languages = alternative_languages or ["en-US"]
         self.api_key = (api_key or os.getenv("GOOGLE_STT_API_KEY") or "").strip() or None

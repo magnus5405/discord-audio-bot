@@ -297,12 +297,6 @@ class BotDashboardApp(App[None]):
         if self._session_live():
             rates = self._settings_store.resolve_pricing_config()
             stt_minutes = metrics.stt_seconds / 60.0
-            stt_usd = stt_minutes * rates["google_stt_usd_per_minute"]
-            gen_usd = (metrics.genai_input_tokens / 1000000.0) * rates["genai_usd_per_1m_input_tokens"] + (
-                metrics.genai_output_tokens / 1000000.0
-            ) * rates["genai_usd_per_1m_output_tokens"]
-            eleven_usd = (metrics.tts_characters / 1000.0) * rates["elevenlabs_usd_per_1k_characters"]
-            total_est = stt_usd + gen_usd + eleven_usd
             self.query_one("#dash_session_timer", MetricTile).set_value(
                 format_session_timer(metrics.session_duration_seconds())
             )
@@ -537,8 +531,8 @@ class BotDashboardApp(App[None]):
 
 def run_tui_application() -> None:
     """Blocking entry: load env, file-only logging, then run the dashboard."""
-    from dotenv import load_dotenv
+    from src.runtime_dirs import load_application_dotenv
 
-    load_dotenv()
+    load_application_dotenv()
     configure_logging_for_tui()
     BotDashboardApp().run()

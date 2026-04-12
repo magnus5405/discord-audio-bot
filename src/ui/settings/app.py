@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from dotenv import load_dotenv
 from textual.app import App
 
 from src.main import configure_logging_for_tui
+from src.runtime_dirs import load_application_dotenv
 from src.storage import SettingsStore
 
 from .screen import BotSettingsScreen
@@ -27,6 +27,6 @@ class SettingsRunnerApp(App[None]):
 
 def run_settings_ui() -> None:
     """Entry point for ``python -m src.ui.settings``."""
-    load_dotenv()
+    load_application_dotenv()
     configure_logging_for_tui()
     SettingsRunnerApp().run()

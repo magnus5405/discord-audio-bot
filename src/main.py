@@ -6,12 +6,11 @@ import argparse
 import asyncio
 import logging
 import os
+import sys
 from argparse import Namespace
 from contextlib import suppress
 from pathlib import Path
 from typing import Sequence
-
-from dotenv import load_dotenv
 
 from src.conversation import ConversationLog
 from src.discord import DiscordAudioSink, DiscordClient, VoicePlaybackManager
@@ -21,6 +20,7 @@ from src.discord.preflight import (
     validate_voice_runtime,
 )
 from src.models import AudioFrame
+from src.runtime_dirs import app_bundle_dir, load_application_dotenv
 from src.session import ConversationRunnerConfig, run_voice_conversation
 from src.storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
 from src.storage.reply_locale import resolve_bot_reply_language_code
@@ -45,6 +45,8 @@ def configure_logging_for_tui() -> None:
     """Send logs to a file so Textual can own the terminal (see TUI_LOG_FILE)."""
     log_file = (os.getenv("TUI_LOG_FILE") or "logs/tui.log").strip() or "logs/tui.log"
     path = Path(log_file)
+    if getattr(sys, "frozen", False) and not path.is_absolute():
+        path = app_bundle_dir() / path
     path.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
     root.handlers.clear()
@@ -575,7 +577,7 @@ async def _run_headless_async(args: Namespace) -> int:
 
 async def run(argv: Sequence[str] | None = None) -> int:
     """Async CLI entry for headless modes (tests ``await`` this). ``--tui`` is synchronous."""
-    load_dotenv()
+    load_application_dotenv()
     args = parse_args(argv)
 
     if args.tui:
@@ -586,7 +588,7 @@ async def run(argv: Sequence[str] | None = None) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Synchronous entrypoint for the smoke runner or ``--tui`` dashboard."""
-    load_dotenv()
+    load_application_dotenv()
     args = parse_args(argv)
 
     if args.tui:

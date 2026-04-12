@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from pydub import AudioSegment
+from rich.markup import escape
 
 import discord
-from rich.markup import escape
 
 from ..conversation import (
     ConversationLog,
@@ -23,6 +23,7 @@ from ..conversation import (
 from ..conversation.chat import format_join_greeting_prompt, format_user_join_greeting_prompt
 from ..discord import DiscordAudioSink, DiscordClient, VoicePlaybackManager
 from ..models import AudioFrame, Persona, TranscriptSegment
+from ..runtime_ffmpeg import probe_audio_duration_seconds
 from ..storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
 from ..transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
 from ..tts import ElevenLabsTTSClient
@@ -31,6 +32,18 @@ from .metrics import SessionMetrics
 logger = logging.getLogger(__name__)
 
 _DISCORD_NICKNAME_MAX_LEN = 32
+
+
+def _unlink_temp_file(path: Path) -> None:
+    """Delete a temp file; retry briefly on Windows when the file is still locked."""
+    for _ in range(20):
+        try:
+            path.unlink(missing_ok=True)
+            return
+        except PermissionError:
+            time.sleep(0.05)
+    with suppress(PermissionError):
+        path.unlink(missing_ok=True)
 
 
 def _persona_mention_trigger_sources(persona: Persona) -> list[str]:
@@ -208,9 +221,12 @@ async def run_voice_conversation(
             if metrics is not None:
                 metrics.status_line = "playing audio"
             await playback_manager.play_file(Path(audio_path))
-            duration_seconds = float(AudioSegment.from_file(audio_path).duration_seconds)
-            tts_client.record_tts_duration(duration_seconds)
-            transcript_writer.add_tts_seconds(duration_seconds)
+            try:
+                duration_seconds = float(probe_audio_duration_seconds(audio_path))
+                tts_client.record_tts_duration(duration_seconds)
+                transcript_writer.add_tts_seconds(duration_seconds)
+            except Exception as exc:
+                logger.warning("TTS duration probe failed: %s", exc)
             char_count = len(stripped)
             tts_client.record_tts_characters(char_count)
             transcript_writer.add_tts_characters(char_count)
@@ -221,7 +237,7 @@ async def run_voice_conversation(
                 metrics.genai_output_tokens = out
                 metrics.total_tokens = inp + out
         finally:
-            Path(audio_path).unlink(missing_ok=True)
+            _unlink_temp_file(Path(audio_path))
 
     audio_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
 

@@ -9,6 +9,8 @@ from typing import Optional
 
 import discord
 
+from ..runtime_ffmpeg import configure_pydub_once, resolve_ffmpeg_executable
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,7 +80,9 @@ class VoicePlaybackManager:
     async def play_file(self, audio_path: Path) -> None:
         """Create an FFmpegOpusAudio source from a file path and play it."""
         logger.info("Playing audio file %s", audio_path)
-        audio_source = discord.FFmpegOpusAudio(str(audio_path))
+        configure_pydub_once()
+        ffmpeg = resolve_ffmpeg_executable()
+        audio_source = discord.FFmpegOpusAudio(str(audio_path), executable=ffmpeg)
         await self.play_audio(audio_source)
 
     async def stop_playback(self) -> None:
