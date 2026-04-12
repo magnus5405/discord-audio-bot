@@ -1,0 +1,29 @@
+name: Version check (latest)
+
+on:
+  pull_request:
+    branches: [latest]
+
+permissions:
+  contents: read
+
+jobs:
+  require-version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging
+        run: pip install packaging
+
+      - name: Verify semver bump vs base branch tip
+        run: >
+          python .github/scripts/check_version_bump.py
+          ${{ github.event.pull_request.base.sha }}
+          ${{ github.sha }}
