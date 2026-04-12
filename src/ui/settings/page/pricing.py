@@ -18,10 +18,10 @@ class PricingSettingsPage(Vertical):
                     yield Label("ElevenLabs — USD per 1,000 characters")
                     yield Input(id="pricing_elevenlabs_per_1k_chars", placeholder="0.1")
                 with Vertical(classes="settings_field_group"):
-                    yield Label("GenAI — USD per 1,000 input tokens")
+                    yield Label("GenAI — USD per 1,000,000 input tokens")
                     yield Input(id="pricing_genai_input_per_1m", placeholder="0.25")
                 with Vertical(classes="settings_field_group"):
-                    yield Label("GenAI — USD per 1,000 output tokens")
+                    yield Label("GenAI — USD per 1,000,000 output tokens")
                     yield Input(id="pricing_genai_output_per_1m", placeholder="1.5")
                 with Vertical(classes="settings_field_group"):
                     yield Label("Google STT — USD per audio minute")

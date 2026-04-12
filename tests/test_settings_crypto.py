@@ -88,6 +88,48 @@ def test_load_template_without_secrets_works_without_env_key(
     assert len(store.personas) == 1
 
 
+def test_save_api_keys_creates_local_key_file_without_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Release-style installs have no .env; a Fernet key file beside settings.json must be created."""
+    monkeypatch.delenv("SETTINGS_SECRET_KEY", raising=False)
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "personas": [
+                    {
+                        "id": "default",
+                        "name": "Default Bot",
+                        "system_instruction": "x",
+                        "genai_model": "gemini-2.5-flash",
+                        "elevenlabs_voice_id": "v",
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(settings_path=path)
+    store.set_api_config(
+        google_gemini_api_key="k1",
+        google_stt_api_key="k2",
+        google_stt_project_id="",
+        elevenlabs_api_key="k3",
+    )
+    assert store.save() is True
+
+    key_path = tmp_path / ".discord_audio_bot_settings_key"
+    assert key_path.is_file()
+
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["api"]["google_gemini_api_key"].startswith(ENC_PREFIX)
+
+    store2 = SettingsStore(settings_path=path)
+    assert store2.resolve_api_secret("google_gemini_api_key", "GOOGLE_GEMINI_API_KEY") == "k1"
+
+
 def test_save_personas_only_without_env_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SETTINGS_SECRET_KEY", raising=False)
     path = tmp_path / "settings.json"
