@@ -16,7 +16,7 @@ jobs:
     env:
       SETTINGS_SECRET_KEY: ${{ secrets.SETTINGS_SECRET_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Create GitHub deployment
         id: deployment
@@ -26,7 +26,7 @@ jobs:
           environment: windows-tui
           environment-url: https://${{ vars.DOMAIN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -59,7 +59,7 @@ jobs:
         run: |
           Copy-Item "build/installer-output/DiscordAudioBotTUI-Setup.exe" "DiscordAudioBotTUI-Setup.exe" -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: discord-audio-bot-tui-windows
           path: |
