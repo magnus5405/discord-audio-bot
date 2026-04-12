@@ -14,6 +14,15 @@ from ..models import Persona, UsageCounters
 logger = logging.getLogger(__name__)
 
 
+def _reply_locale_system_prefix(locale_tag: str) -> str:
+    """Prepend so locale wins over persona tone and English-heavy user turns."""
+    return (
+        f"[OUTPUT LANGUAGE — HIGHEST PRIORITY] Write every assistant message only in "
+        f'locale "{locale_tag}" (BCP-47). Do not use English unless that locale is English '
+        f"(e.g. en-US). Do not mirror another language from the room or from instructions.\n\n"
+    )
+
+
 def _reply_locale_system_suffix(locale_tag: str) -> str:
     """Append to system instruction so the model does not default to English."""
     return (
@@ -35,17 +44,76 @@ def format_transcript_user_message(
     describing what was said since the bot last spoke.
     """
     block = transcript_block.strip()
+    tag = (reply_locale or "").strip()
     intro = (
         "Here is what people in the voice channel said since your last reply "
         '(each line is "Username: text"). Give a brief spoken reply in '
         "1–2 short sentences that fits naturally in the conversation."
     )
-    if reply_locale:
+    if tag:
         intro = (
-            f'Your reply must be in locale {reply_locale} (BCP-47), same as the '
-            "configured voice session. " + intro
+            f'Your reply must be in locale {tag} (BCP-47), same as the '
+            "configured voice session. Do not switch to English or mirror the "
+            "transcript language unless that language is the one for this locale. "
+            + intro
         )
-    return f"{intro}\n\n{block}"
+    parts = [intro, "", block]
+    if tag:
+        parts.extend(["", f"End with a reply only in locale {tag}; no other language."])
+    return "\n".join(parts)
+
+
+def join_greeting_chat_history(greeting_prompt: str, greeting_text: str) -> list[types.Content]:
+    """Seed multiturn chat so later replies see the join exchange."""
+    return [
+        types.Content(role="user", parts=[types.Part(text=greeting_prompt)]),
+        types.Content(role="model", parts=[types.Part(text=greeting_text)]),
+    ]
+
+
+def format_join_greeting_prompt(
+    names_str: str,
+    *,
+    reply_locale: str | None = None,
+) -> str:
+    """Build the user turn for the join greeting (first model output in the session)."""
+    body = (
+        "You just joined this Discord voice channel. "
+        f"Users currently present: {names_str}. "
+        "Give a brief, friendly spoken-style hello in 1-2 sentences."
+    )
+    tag = (reply_locale or "").strip()
+    if not tag:
+        return body
+    return (
+        f'Write your entire greeting only in the language of locale {tag} (BCP-47). '
+        "Do not use English unless that locale is an English variant (e.g. en-US).\n\n"
+        f"{body}\n\n"
+        f"Reminder: the greeting must be entirely in locale {tag}."
+    )
+
+
+def format_user_join_greeting_prompt(
+    display_name: str,
+    *,
+    reply_locale: str | None = None,
+) -> str:
+    """User turn for greeting someone who just connected to the voice channel (by nickname)."""
+    name = (display_name or "").strip() or "them"
+    body = (
+        f'A user just joined this Discord voice channel. Their display name is "{name}". '
+        "Give one brief, friendly spoken-style welcome (1-2 sentences) that feels unique to them "
+        f'(use their name naturally — "{name}"). Do not copy a generic template verbatim.'
+    )
+    tag = (reply_locale or "").strip()
+    if not tag:
+        return body
+    return (
+        f'Write your entire welcome only in the language of locale {tag} (BCP-47). '
+        "Do not use English unless that locale is an English variant (e.g. en-US).\n\n"
+        f"{body}\n\n"
+        f"Reminder: the welcome must be entirely in locale {tag}."
+    )
 
 
 class GenAIChatManager:
@@ -70,7 +138,7 @@ class GenAIChatManager:
         Args:
             api_key: Gemini API key (optional, reads GOOGLE_GEMINI_API_KEY if
                 not provided)
-            reply_locale: BCP-47 tag (e.g. da-DK) for spoken replies; aligns with
+            reply_locale: BCP-47 tag (e.g. en-US) for spoken replies; aligns with
                 ``stt.language_code`` in settings when passed from the orchestrator.
         """
         resolved = api_key or os.getenv("GOOGLE_GEMINI_API_KEY")
@@ -85,25 +153,58 @@ class GenAIChatManager:
         self._reply_locale = (reply_locale or "").strip() or None
         logger.info("GenAIChatManager initialized")
 
-    async def create_chat_session(self, persona: Persona) -> None:
+    def _accumulate_usage(self, response: Any) -> None:
+        usage = getattr(response, "usage_metadata", None)
+        if usage is None:
+            return
+        prompt = getattr(usage, "prompt_token_count", None)
+        candidates = getattr(usage, "candidates_token_count", None)
+        total = getattr(usage, "total_token_count", None)
+        used_breakdown = False
+        if isinstance(prompt, int) and prompt > 0:
+            self.usage_counters.input_tokens += prompt
+            used_breakdown = True
+        if isinstance(candidates, int) and candidates > 0:
+            self.usage_counters.output_tokens += candidates
+            used_breakdown = True
+        if not used_breakdown and isinstance(total, int) and total > 0:
+            self.usage_counters.output_tokens += total
+
+    def get_token_usage_breakdown(self) -> tuple[int, int]:
+        """Cumulative GenAI prompt (input) and candidates (output) tokens."""
+        return (self.usage_counters.input_tokens, self.usage_counters.output_tokens)
+
+    async def create_chat_session(
+        self,
+        persona: Persona,
+        *,
+        history: Optional[list[types.Content]] = None,
+    ) -> None:
         """
         Create a new async chat session with persona instructions.
 
         Args:
             persona: Persona configuration with system instruction and model id
+            history: Optional prior turns (e.g. join greeting) for multiturn context.
         """
         self.current_persona = persona
-        system_instruction = persona.system_instruction
+        system_instruction = persona.system_instruction or ""
         if self._reply_locale:
-            system_instruction = system_instruction + _reply_locale_system_suffix(self._reply_locale)
+            system_instruction = (
+                _reply_locale_system_prefix(self._reply_locale)
+                + system_instruction
+                + _reply_locale_system_suffix(self._reply_locale)
+            )
             logger.info("GenAI system instruction includes reply locale %s", self._reply_locale)
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
+            temperature=0.65,
         )
         # google-genai: aio.chats.create returns AsyncChat synchronously; await send_message instead.
         self._chat = self._client.aio.chats.create(
             model=persona.genai_model,
             config=config,
+            history=list(history) if history else [],
         )
         logger.info("Chat session created with persona '%s'", persona.display_name)
 
@@ -122,11 +223,7 @@ class GenAIChatManager:
 
         logger.debug("Sending message (%s chars)", len(text))
         response = await self._chat.send_message(text)
-        usage = getattr(response, "usage_metadata", None)
-        if usage is not None:
-            total = getattr(usage, "total_token_count", None)
-            if isinstance(total, int) and total > 0:
-                self.usage_counters.total_tokens += total
+        self._accumulate_usage(response)
 
         reply = (getattr(response, "text", None) or "").strip()
         logger.debug("Received reply (%s chars)", len(reply))

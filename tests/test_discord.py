@@ -841,6 +841,80 @@ def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -
         assert payload["channel_id"] == 42
         assert payload["segments"][0]["username"] == "Alice"
         assert payload["segments"][0]["text"] == "hello from phase three"
-        assert payload["usage"] == {"total_tokens": 0, "tts_seconds_generated": 0.0}
+        assert payload["usage"] == {
+            "total_tokens": 0,
+            "genai_input_tokens": 0,
+            "genai_output_tokens": 0,
+            "tts_seconds_generated": 0.0,
+            "tts_characters": 0,
+            "stt_seconds_processed": 0.0,
+        }
+
+    run_async(scenario())
+
+
+def test_voice_join_handler_invoked_when_user_enters_target_channel() -> None:
+    """Entering the watched voice channel schedules the join callback."""
+
+    async def scenario() -> None:
+        fake_client = FakeGatewayClient(intents=None)
+        discord_client = DiscordClient("token123", client_factory=make_client_factory(fake_client))
+        await discord_client.connect()
+        seen: list[int] = []
+
+        async def handler(member: object) -> None:
+            seen.append(getattr(member, "id", 0))
+
+        discord_client.set_voice_join_handler(10, handler)
+        member = SimpleNamespace(id=7, bot=False)
+        before = SimpleNamespace(channel=None)
+        after = SimpleNamespace(channel=SimpleNamespace(id=10))
+        await fake_client.on_voice_state_update(member, before, after)
+        for _ in range(50):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        assert seen == [7]
+
+        discord_client.set_voice_join_handler(None, None)
+        await fake_client.on_voice_state_update(member, before, after)
+        await asyncio.sleep(0.02)
+        assert seen == [7]
+
+        await discord_client.disconnect()
+
+    run_async(scenario())
+
+
+def test_voice_join_handler_skips_same_channel_updates_and_bots() -> None:
+    """Mute/deaf-only updates (same channel) and bot members do not dispatch."""
+
+    async def scenario() -> None:
+        fake_client = FakeGatewayClient(intents=None)
+        dc = DiscordClient("token123", client_factory=make_client_factory(fake_client))
+        await dc.connect()
+        called = 0
+
+        async def handler(member: object) -> None:
+            nonlocal called
+            called += 1
+
+        dc.set_voice_join_handler(10, handler)
+        ch10 = SimpleNamespace(id=10)
+        member = SimpleNamespace(id=7, bot=False)
+        await fake_client.on_voice_state_update(
+            member, SimpleNamespace(channel=ch10), SimpleNamespace(channel=ch10)
+        )
+        await asyncio.sleep(0.02)
+        assert called == 0
+
+        bot_member = SimpleNamespace(id=8, bot=True)
+        await fake_client.on_voice_state_update(
+            bot_member, SimpleNamespace(channel=None), SimpleNamespace(channel=ch10)
+        )
+        await asyncio.sleep(0.02)
+        assert called == 0
+
+        await dc.disconnect()
 
     run_async(scenario())

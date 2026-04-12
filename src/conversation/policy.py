@@ -151,3 +151,32 @@ class ReplyTriggerPolicy:
         """Set state machine state."""
         self.state = state
         logger.debug(f"State changed to: {state.value}")
+
+    def snapshot_for_ui(self, now: float | None = None) -> tuple[bool, float, float]:
+        """
+        Values for dashboards: mention-window active, seconds left in that window,
+        and seconds remaining on the post-reply cooldown timer.
+
+        Mention window is active only in MENTION_WAITING with a recorded timestamp.
+        Cooldown uses time since the last bot reply; 0.0 if no reply yet or cooldown elapsed.
+        """
+        if now is None:
+            now = time.time()
+
+        mention_waiting = (
+            self.state == TriggerState.MENTION_WAITING
+            and self.mention_detected_timestamp is not None
+        )
+        mention_left = 0.0
+        if mention_waiting and self.mention_detected_timestamp is not None:
+            mention_left = max(
+                0.0, self.mention_window_seconds - (now - self.mention_detected_timestamp)
+            )
+
+        cooldown_left = 0.0
+        if self.last_bot_reply_timestamp is not None:
+            cooldown_left = max(
+                0.0, self.cooldown_seconds - (now - self.last_bot_reply_timestamp)
+            )
+
+        return mention_waiting, mention_left, cooldown_left

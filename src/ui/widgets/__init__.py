@@ -1,6 +1,21 @@
 """Custom Textual widgets for the bot UI."""
 
-from .status import BotStatus
-from .selectors import ChannelSelector, PersonaSelector
+from .dashboard import (
+    CooldownTile,
+    ElevenlabsCharactersTile,
+    MentionWindowTile,
+    MetricTile,
+    STTMinutesTile,
+    SessionTimerTile,
+    TokensTile,
+)
 
-__all__ = ["BotStatus", "ChannelSelector", "PersonaSelector"]
+__all__ = [
+    "CooldownTile",
+    "ElevenlabsCharactersTile",
+    "MentionWindowTile",
+    "MetricTile",
+    "SessionTimerTile",
+    "STTMinutesTile",
+    "TokensTile",
+]

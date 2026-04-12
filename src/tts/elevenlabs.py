@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from ..models import Persona
+from ..storage.settings import SettingsStore
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,19 @@ def resolve_elevenlabs_api_key_from_env() -> Optional[str]:
     return key if key else None
 
 
+def resolve_elevenlabs_api_key(settings_store: SettingsStore | None = None) -> Optional[str]:
+    """Resolve ElevenLabs auth from TUI settings first, then environment."""
+    if settings_store is not None:
+        key = settings_store.resolve_api_secret(
+            "elevenlabs_api_key",
+            "ELEVENLABS_API_KEY",
+            "ELEVEN_API_KEY",
+        )
+        if key:
+            return key
+    return resolve_elevenlabs_api_key_from_env()
+
+
 async def _raise_for_status_or_tts_auth_hint(response: httpx.Response) -> None:
     """Raise on HTTP errors; attach a clearer message for ElevenLabs auth failures."""
     if response.is_success:
@@ -44,9 +58,10 @@ async def _raise_for_status_or_tts_auth_hint(response: httpx.Response) -> None:
     if response.status_code in (401, 403):
         raise RuntimeError(
             "ElevenLabs API rejected this API key (HTTP "
-            f"{response.status_code}). Set ELEVENLABS_API_KEY or ELEVEN_API_KEY in `.env` "
-            "to a valid key from https://elevenlabs.io/app/settings/api-keys — no quotes, "
-            "no leading/trailing spaces. Regenerate the key if it was rotated."
+            f"{response.status_code}). Set the ElevenLabs key in the TUI API config or "
+            "ELEVENLABS_API_KEY / ELEVEN_API_KEY in `.env` to a valid key from "
+            "https://elevenlabs.io/app/settings/api-keys - no quotes, no leading/trailing "
+            "spaces. Regenerate the key if it was rotated."
             + (f" Response: {detail!r}" if detail else "")
         ) from None
     response.raise_for_status()
@@ -82,6 +97,7 @@ class ElevenLabsTTSClient:
         self.model_id = resolved or _DEFAULT_MODEL_ID
         self._http_transport = http_transport
         self.total_seconds_generated = 0.0
+        self.total_characters_synthesized = 0
         logger.info("ElevenLabsTTSClient initialized (model_id=%s)", self.model_id)
 
     def _tts_url(self, voice_id: str) -> str:
@@ -165,6 +181,16 @@ class ElevenLabsTTSClient:
             duration_seconds,
             self.total_seconds_generated,
         )
+
+    def record_tts_characters(self, character_count: int) -> None:
+        """Record characters sent to TTS (ElevenLabs usage unit)."""
+        if character_count > 0:
+            self.total_characters_synthesized += int(character_count)
+            logger.debug(
+                "TTS characters recorded: +%d (total: %d)",
+                character_count,
+                self.total_characters_synthesized,
+            )
 
     async def get_account_usage(self) -> Optional[dict]:
         """Get account-level character/voice usage statistics."""

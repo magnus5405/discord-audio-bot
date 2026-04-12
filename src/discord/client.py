@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import suppress
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 import discord
 from discord.ext.voice_recv import AudioSink, VoiceRecvClient
@@ -39,6 +39,8 @@ class DiscordClient:
         self._gateway_task: Optional[asyncio.Task[None]] = None
         self._receive_done_future: Optional[asyncio.Future[None]] = None
         self._receive_shutdown_error: Optional[Exception] = None
+        self._voice_join_channel_id: Optional[int] = None
+        self._voice_member_joined_handler: Optional[Callable[[discord.Member], Awaitable[None]]] = None
         apply_discord_ext_voice_recv_patches()
         logger.info("DiscordClient initialized")
 
@@ -52,6 +54,14 @@ class DiscordClient:
         async def on_ready() -> None:
             logger.info("Discord gateway ready as %s", client.user)
             self._ready_event.set()
+
+        @client.event
+        async def on_voice_state_update(
+            member: discord.Member,
+            before: discord.VoiceState,
+            after: discord.VoiceState,
+        ) -> None:
+            await self._dispatch_voice_member_joined(member, before, after)
 
         return client
 
@@ -97,6 +107,46 @@ class DiscordClient:
     def _reset_receive_state(self) -> None:
         self._receive_done_future = None
         self._receive_shutdown_error = None
+
+    def set_voice_join_handler(
+        self,
+        channel_id: int | None,
+        handler: Callable[[discord.Member], Awaitable[None]] | None,
+    ) -> None:
+        """Notify when a non-bot member enters ``channel_id`` (or clear with ``None``)."""
+        self._voice_join_channel_id = channel_id
+        self._voice_member_joined_handler = handler
+
+    async def _dispatch_voice_member_joined(
+        self,
+        member: discord.Member,
+        before: discord.VoiceState,
+        after: discord.VoiceState,
+    ) -> None:
+        cid = self._voice_join_channel_id
+        handler = self._voice_member_joined_handler
+        if cid is None or handler is None:
+            return
+        after_ch = after.channel
+        before_ch = before.channel
+        if after_ch is None or after_ch.id != cid:
+            return
+        if before_ch is not None and before_ch.id == cid:
+            return
+        client_user = self.client.user if self.client is not None else None
+        bot_id = getattr(client_user, "id", None)
+        if bot_id is not None and member.id == bot_id:
+            return
+        if getattr(member, "bot", False):
+            return
+
+        async def _run() -> None:
+            try:
+                await handler(member)
+            except Exception:
+                logger.exception("Voice join handler failed for member %s", member.id)
+
+        asyncio.create_task(_run())
 
     def _finalize_receive_shutdown(self, error: Exception | None) -> None:
         self._receive_shutdown_error = error

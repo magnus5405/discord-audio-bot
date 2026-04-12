@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+
+import pytest
 from array import array
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from google.auth.exceptions import DefaultCredentialsError
+
 from src.models import AudioFrame, TranscriptSegment
 from src.storage.transcripts import TranscriptSessionWriter
 from src.transcription.coordinator import PerUserTranscriptionCoordinator
 from src.transcription.preprocessing import convert_to_linear16, get_audio_duration, to_mono
-from src.transcription.stt import GoogleSTTClient
+from src.transcription.stt import GoogleSTTClient, GoogleSTTV1Client, GoogleSTTV2Client
+
+
+@pytest.fixture(autouse=True)
+def _isolate_google_stt_from_dotenv(monkeypatch):
+    """GoogleSTTV2Client calls load_dotenv(); repo .env must not override test env."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *_a, **_k: True)
 
 
 def run_async(awaitable):
@@ -52,8 +62,8 @@ class FakeSpeechAsyncClient:
             self.requests.append(request)
         return FakeAsyncResponses(self.responses)
 
-    async def recognize(self, *, config, audio, **_kwargs):
-        self.recognize_calls.append({"config": config, "audio": audio})
+    async def recognize(self, *, recognizer=None, config=None, content=None, **_kwargs):
+        self.recognize_calls.append({"recognizer": recognizer, "config": config, "content": content})
         return self.batch_response
 
 
@@ -170,6 +180,8 @@ def test_google_stt_client_builds_streaming_requests_and_parses_final_results():
             primary_language="da-DK",
             alternative_languages=["en-US"],
             api_key="stt-api-key",
+            project_id="test-proj",
+            location="global",
             client=fake_client,
         )
 
@@ -190,12 +202,15 @@ def test_google_stt_client_builds_streaming_requests_and_parses_final_results():
 
         assert len(fake_client.requests) == 3
         config_request = fake_client.requests[0]
-        assert config_request.streaming_config.config.encoding.name == "LINEAR16"
-        assert config_request.streaming_config.config.sample_rate_hertz == 48000
-        assert config_request.streaming_config.config.language_code == "da-DK"
-        assert list(config_request.streaming_config.config.alternative_language_codes) == ["en-US"]
-        assert config_request.streaming_config.interim_results is False
-        assert [request.audio_content for request in fake_client.requests[1:]] == [b"chunk-1", b"chunk-2"]
+        assert config_request.recognizer == "projects/test-proj/locations/global/recognizers/_"
+        dec = config_request.streaming_config.config.explicit_decoding_config
+        assert dec.encoding.name == "LINEAR16"
+        assert dec.sample_rate_hertz == 48000
+        assert list(config_request.streaming_config.config.language_codes) == ["da-DK", "en-US"]
+        assert config_request.streaming_config.config.model == "chirp_3"
+        assert config_request.streaming_config.config.features.enable_automatic_punctuation is True
+        assert config_request.streaming_config.streaming_features.interim_results is False
+        assert [request.audio for request in fake_client.requests[1:]] == [b"chunk-1", b"chunk-2"]
 
         assert [segment.text for segment in segments] == ["Hej verden", "How are you?"]
         assert segments[0].start_ts == 100.0
@@ -204,6 +219,38 @@ def test_google_stt_client_builds_streaming_requests_and_parses_final_results():
         assert segments[1].start_ts == 101.5
         assert segments[1].end_ts == 102.25
         assert segments[1].language_code == "en-US"
+
+    run_async(scenario())
+
+
+def test_google_stt_chirp3_trims_language_codes_to_two_for_streaming_config():
+    """Chirp 3 rejects >2 language_codes on StreamingRecognize; keep primary + first alternative."""
+
+    async def scenario() -> None:
+        fake_client = FakeSpeechAsyncClient(responses=[])
+        stt_client = GoogleSTTClient(
+            primary_language="da-DK",
+            alternative_languages=["en-US", "en-GB"],
+            api_key="stt-api-key",
+            project_id="test-proj",
+            location="global",
+            client=fake_client,
+        )
+
+        async def audio_stream():
+            yield b"x"
+
+        async for _ in stt_client.stream_recognize(
+            audio_stream=audio_stream(),
+            user_id=1,
+            username="Bob",
+            sample_rate_hz=48000,
+            utterance_started_at=0.0,
+        ):
+            pass
+
+        config_request = fake_client.requests[0]
+        assert list(config_request.streaming_config.config.language_codes) == ["da-DK", "en-US"]
 
     run_async(scenario())
 
@@ -228,6 +275,8 @@ def test_google_stt_client_falls_back_to_batch_when_streaming_returns_no_final_r
             primary_language="da-DK",
             alternative_languages=["en-US"],
             api_key="stt-api-key",
+            project_id="test-proj",
+            location="global",
             client=fake_client,
         )
 
@@ -250,9 +299,16 @@ def test_google_stt_client_falls_back_to_batch_when_streaming_returns_no_final_r
         assert segments[0].start_ts == 200.0
         assert segments[0].end_ts == 200.75
         assert len(fake_client.recognize_calls) == 1
-        assert fake_client.recognize_calls[0]["audio"].content == b"chunk-1chunk-2"
+        assert fake_client.recognize_calls[0]["content"] == b"chunk-1chunk-2"
 
     run_async(scenario())
+
+
+def test_google_stt_v2_default_location_matches_google_model_regions() -> None:
+    """Chirp 3 is only in multi-regions us/eu; Chirp 2 is in europe-west4 per Google docs."""
+    assert GoogleSTTV2Client._default_location_for_model("chirp_3") == "eu"
+    assert GoogleSTTV2Client._default_location_for_model("chirp_2") == "europe-west4"
+    assert GoogleSTTV2Client._default_location_for_model("latest_long") == "global"
 
 
 def test_google_stt_client_uses_explicit_api_key(monkeypatch):
@@ -264,17 +320,173 @@ def test_google_stt_client_uses_explicit_api_key(monkeypatch):
             self.client_options = client_options
             created_clients.append(self)
 
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("GOOGLE_STT_API_KEY", "stt-api-key-from-env")
-    with patch("src.transcription.stt.speech_v1.SpeechAsyncClient", FakeAsyncClient):
+    monkeypatch.setenv("GOOGLE_STT_PROJECT_ID", "env-proj")
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
         stt_client = GoogleSTTClient(primary_language="da-DK")
 
     assert stt_client.api_key == "stt-api-key-from-env"
-    assert created_clients[0].client_options.api_key == "stt-api-key-from-env"
+    co = created_clients[0].client_options
+    assert co.api_key == "stt-api-key-from-env"
+    assert co.api_endpoint == "eu-speech.googleapis.com"
+
+
+def test_google_stt_client_uses_adc_when_api_key_unset(monkeypatch):
+    """Without GOOGLE_STT_API_KEY, the client should use default credentials (no api_key option)."""
+    created_clients: list[object] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+            created_clients.append(self)
+
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GOOGLE_STT_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_STT_PROJECT_ID", "adc-proj")
+    monkeypatch.setattr(
+        "src.transcription.stt.google.auth.default",
+        lambda *a, **k: (object(), "adc-proj"),
+    )
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
+        stt_client = GoogleSTTClient(primary_language="da-DK", api_key=None)
+
+    assert stt_client.api_key is None
+    co = created_clients[0].client_options
+    assert co is not None
+    assert getattr(co, "api_key", None) in (None, "")
+    assert co.api_endpoint == "eu-speech.googleapis.com"
+
+
+def test_google_stt_client_credentials_file_beats_constructor_api_key(monkeypatch, tmp_path):
+    """GOOGLE_APPLICATION_CREDENTIALS must win over an explicit api_key (e.g. from SettingsStore)."""
+    created_clients: list[object] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+            created_clients.append(self)
+
+    sa_path = tmp_path / "sa.json"
+    sa_path.write_text(
+        '{"type": "service_account", "project_id": "from-sa"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(sa_path))
+    monkeypatch.setattr(
+        "src.transcription.stt.google.auth.default",
+        lambda *a, **k: (object(), "from-sa"),
+    )
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
+        stt_client = GoogleSTTClient(
+            primary_language="da-DK",
+            api_key="explicit-key-from-settings-store",
+        )
+
+    assert stt_client.api_key is None
+    assert stt_client.project_id == "from-sa"
+    co = created_clients[0].client_options
+    assert co is not None
+    assert getattr(co, "api_key", None) in (None, "")
+    assert co.api_endpoint == "eu-speech.googleapis.com"
+
+
+def test_google_stt_client_skips_ai_studio_project_for_sa_json_project(monkeypatch, tmp_path):
+    """gen-lang-client-* from settings/env should not override a normal project_id in the JSON."""
+    sa_path = tmp_path / "sa.json"
+    sa_path.write_text(
+        '{"type": "service_account", "project_id": "my-real-gcp-project"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(sa_path))
+    monkeypatch.setattr(
+        "src.transcription.stt.google.auth.default",
+        lambda *a, **k: (object(), None),
+    )
+
+    class FakeAsyncClient:
+        def __init__(self, *, client_options=None):
+            pass
+
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
+        stt_client = GoogleSTTClient(
+            primary_language="da-DK",
+            api_key=None,
+            project_id="gen-lang-client-0125307861",
+        )
+
+    assert stt_client.project_id == "my-real-gcp-project"
+
+
+def test_google_stt_client_service_account_file_ignores_stt_api_key_env(monkeypatch, tmp_path):
+    """When GOOGLE_APPLICATION_CREDENTIALS is set, STT must not use GOOGLE_STT_API_KEY."""
+    created_clients: list[object] = []
+
+    class FakeAsyncClient:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+            created_clients.append(self)
+
+    sa_path = tmp_path / "sa.json"
+    sa_path.write_text(
+        '{"type": "service_account", "project_id": "svc-proj"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(sa_path))
+    monkeypatch.setenv("GOOGLE_STT_API_KEY", "ignored-for-stt")
+    monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
+    monkeypatch.setattr(
+        "src.transcription.stt.google.auth.default",
+        lambda *a, **k: (object(), "svc-proj"),
+    )
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
+        stt_client = GoogleSTTClient(primary_language="da-DK")
+
+    assert stt_client.api_key is None
+    assert stt_client.project_id == "svc-proj"
+    co = created_clients[0].client_options
+    assert co is not None
+    assert getattr(co, "api_key", None) in (None, "")
+    assert co.api_endpoint == "eu-speech.googleapis.com"
+
+
+def test_google_stt_client_reads_project_id_from_credentials_json(monkeypatch, tmp_path):
+    """If project env vars are unset, use project_id from the service account JSON."""
+    sa_path = tmp_path / "sa.json"
+    sa_path.write_text(
+        '{"type": "service_account", "project_id": "json-only-proj"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(sa_path))
+    monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("GOOGLE_STT_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "src.transcription.stt.google.auth.default",
+        lambda *a, **k: (object(), None),
+    )
+
+    class FakeAsyncClient:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+
+    with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
+        stt_client = GoogleSTTClient(primary_language="da-DK")
+
+    assert stt_client.project_id == "json-only-proj"
 
 
 def test_google_stt_client_raises_clear_error_when_no_credentials(monkeypatch):
-    """Missing STT API keys should raise an actionable error message."""
+    """Missing API key and ADC should raise an actionable error message."""
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.delenv("GOOGLE_STT_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_STT_PROJECT_ID", "has-project")
+
+    def fake_default(*_a, **_kw):
+        raise DefaultCredentialsError("no credentials")
+
+    monkeypatch.setattr("src.transcription.stt.google.auth.default", fake_default)
 
     try:
         GoogleSTTClient(primary_language="da-DK")
@@ -283,7 +495,60 @@ def test_google_stt_client_raises_clear_error_when_no_credentials(monkeypatch):
     else:
         raise AssertionError("Expected GoogleSTTClient to raise ValueError")
 
-    assert "GOOGLE_STT_API_KEY" in message
+    assert "GOOGLE_STT_API_KEY" in message and "GOOGLE_APPLICATION_CREDENTIALS" in message
+
+
+def test_google_stt_factory_selects_v1_for_ai_studio_when_api_key_present(monkeypatch):
+    """gen-lang-client-* + API key should use legacy v1 (no v2 recognizer IAM)."""
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setenv("GOOGLE_STT_PROJECT_ID", "gen-lang-client-0125307861")
+    monkeypatch.setenv("GOOGLE_STT_API_KEY", "ai-studio-style-key")
+    monkeypatch.delenv("GOOGLE_STT_SPEECH_BACKEND", raising=False)
+
+    class FakeV1:
+        def __init__(self, *, client_options=None):
+            self.client_options = client_options
+
+    with patch("src.transcription.stt_v1.speech_v1.SpeechAsyncClient", FakeV1):
+        stt_client = GoogleSTTClient(primary_language="da-DK")
+
+    assert isinstance(stt_client, GoogleSTTV1Client)
+    assert stt_client.api_key == "ai-studio-style-key"
+
+
+def test_google_stt_factory_v2_with_ai_studio_project_raises() -> None:
+    """Forcing v2 with an AI Studio project id must fail fast with a clear error."""
+    try:
+        GoogleSTTClient(
+            primary_language="da-DK",
+            api_key="any-key",
+            project_id="gen-lang-client-0125307861",
+            speech_backend="v2",
+        )
+    except ValueError as exc:
+        msg = str(exc).lower()
+    else:
+        raise AssertionError("Expected ValueError")
+
+    assert "v2" in msg and "gen-lang" in msg
+
+
+def test_google_stt_client_raises_clear_error_when_no_project_id(monkeypatch):
+    """Speech v2 requires a GCP project id for the implicit recognizer path."""
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.setenv("GOOGLE_STT_API_KEY", "key-present")
+    monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+    monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
+
+    try:
+        GoogleSTTClient(primary_language="da-DK")
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected GoogleSTTClient to raise ValueError")
+
+    assert "GOOGLE_STT_PROJECT_ID" in message or "GOOGLE_CLOUD_PROJECT" in message
 
 
 def test_transcription_coordinator_keeps_users_separate_and_splits_on_idle_gap():
@@ -398,4 +663,11 @@ def test_transcript_session_writer_rewrites_valid_session_json(tmp_path):
     assert payload["channel_name"] == "Main Lobby"
     assert [segment["username"] for segment in payload["segments"]] == ["Alice", "Bob"]
     assert payload["bot_replies"] == []
-    assert payload["usage"] == {"total_tokens": 0, "tts_seconds_generated": 0.0}
+    assert payload["usage"] == {
+        "total_tokens": 0,
+        "genai_input_tokens": 0,
+        "genai_output_tokens": 0,
+        "tts_seconds_generated": 0.0,
+        "tts_characters": 0,
+        "stt_seconds_processed": 0.0,
+    }
