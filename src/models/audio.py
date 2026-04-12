@@ -8,10 +8,7 @@ from dataclasses import dataclass
 
 @dataclass
 class AudioFrame:
-    """Represents a chunk of audio received from a Discord user.
-    
-    Phase 2: Voice receive plumbing
-    """
+    """Represents a chunk of audio received from a Discord user."""
 
     user_id: int
     username: str

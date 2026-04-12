@@ -1,15 +1,12 @@
 """Configuration and usage tracking models."""
 
-from dataclasses import dataclass, field
 import time
+from dataclasses import dataclass, field
 
 
 @dataclass
 class Persona:
-    """Represents a bot personality configuration.
-    
-    Phase 4: Conversation + GenAI
-    """
+    """Represents a bot personality configuration."""
 
     persona_id: str
     display_name: str
@@ -20,10 +17,7 @@ class Persona:
 
 @dataclass
 class UsageCounters:
-    """Tracks token and audio usage for the session.
-    
-    Phase 5: TTS + tracking
-    """
+    """Tracks token and audio usage for the session."""
 
     input_tokens: int = 0
     output_tokens: int = 0

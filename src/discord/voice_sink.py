@@ -8,10 +8,11 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-import discord
-from discord.opus import Decoder, OpusError
 from discord.ext.voice_recv import AudioSink, VoiceData
 from discord.ext.voice_recv.opus import PacketDecoder
+from discord.opus import Decoder, OpusError
+
+import discord
 
 from ..models import AudioFrame
 
@@ -66,9 +67,9 @@ class DiscordAudioSink(AudioSink):
     """
     Audio sink for validating Discord voice receive plumbing.
 
-    The phase-two smoke runner defaults to Opus mode to validate receive without
-    depending on PCM decode. Phase three uses PCM receive so downstream
-    transcription always gets real PCM bytes with user attribution.
+    Receive smoke mode defaults to Opus to validate receive without depending on
+    PCM decode. Transcription mode uses PCM receive so downstream STT always gets
+    real PCM bytes with user attribution.
     """
 
     def __init__(

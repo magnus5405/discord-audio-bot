@@ -1,7 +1,6 @@
 """Tests for core data models."""
 
-import pytest
-from src.models import AudioFrame, TranscriptSegment, Persona, UsageCounters
+from src.models import AudioFrame, Persona, TranscriptSegment, UsageCounters
 
 
 class TestAudioFrame:

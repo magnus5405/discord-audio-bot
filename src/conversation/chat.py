@@ -122,8 +122,6 @@ class GenAIChatManager:
 
     Maintains conversation state, applies persona instructions,
     tracks token usage via usage_metadata.
-
-    Phase 4: Conversation policy + GenAI
     """
 
     def __init__(

@@ -12,7 +12,7 @@ if "%~1"=="" (
 
 if "%CMD%"=="lint" (
     echo Running ruff linter...
-    ruff check src\
+    ruff check src\ tests\
     echo ✓ Ruff checks passed
     goto :EOF
 )
@@ -37,7 +37,7 @@ if "%CMD%"=="check" (
     echo Running all checks...
     black --check src\ tests\
     isort --check-only src\ tests\
-    ruff check src\
+    ruff check src\ tests\
     mypy src\ --ignore-missing-imports --strict
     echo ✓ All checks passed
     goto :EOF

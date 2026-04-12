@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-import discord
 from pydub import AudioSegment
+
+import discord
 
 from ..conversation import (
     ConversationLog,

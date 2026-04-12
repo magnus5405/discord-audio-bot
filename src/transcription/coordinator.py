@@ -6,8 +6,7 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import AsyncIterator
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 
 from ..models import AudioFrame, TranscriptSegment

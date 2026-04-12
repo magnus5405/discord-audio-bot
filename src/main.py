@@ -1,4 +1,4 @@
-"""Main phase-one and phase-two entrypoint for Discord voice smoke tests."""
+"""CLI entrypoint for Discord headless smoke tests and the Textual TUI."""
 
 from __future__ import annotations
 
@@ -21,8 +21,11 @@ from src.discord.preflight import (
     validate_voice_runtime,
 )
 from src.models import AudioFrame
+from src.session import ConversationRunnerConfig, run_voice_conversation
 from src.storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
+from src.storage.reply_locale import resolve_bot_reply_language_code
 from src.transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
+from src.tts import resolve_elevenlabs_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +78,27 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--receive-smoke",
         action="store_true",
-        help="Run the phase-two receive smoke flow around playback",
+        help="Run receive smoke flow: listen, play a clip, listen again with a fresh sink",
     )
     parser.add_argument(
         "--transcribe",
         action="store_true",
-        help="Run phase-three per-user speech-to-text transcription",
+        help="Run per-user speech-to-text transcription in the voice channel",
+    )
+    parser.add_argument(
+        "--converse",
+        action="store_true",
+        help=(
+            "Full conversation: STT, Gemini replies, and ElevenLabs playback "
+            "(requires personas and API keys; same listen window as --transcribe)"
+        ),
     )
     parser.add_argument(
         "--listen-window-seconds",
         type=float,
         help=(
             "Seconds to listen before and after playback in receive smoke mode, "
-            "or the total transcription window when used with --transcribe"
+            "or the total window for --transcribe / --converse (omit to run until Ctrl+C)"
         ),
     )
     parser.add_argument(
@@ -151,7 +162,7 @@ def resolve_listen_window_seconds(cli_value: float) -> float:
 
 
 def resolve_receive_smoke_window_seconds(cli_value: float | None) -> float:
-    """Resolve the listen window for phase-two receive smoke mode."""
+    """Resolve the listen window for receive smoke mode."""
     return 10.0 if cli_value is None else resolve_listen_window_seconds(cli_value)
 
 
@@ -302,7 +313,7 @@ async def run_receive_smoke(
     audio_path: Path,
     listen_window_seconds: float,
 ) -> None:
-    """Run the phase-two receive smoke flow around a playback clip."""
+    """Run receive smoke flow around a playback clip."""
     logger.info(
         "Running receive smoke flow with %.1f second windows before and after playback.",
         listen_window_seconds,
@@ -335,7 +346,7 @@ async def run_transcription_mode(
     *,
     settings_store: SettingsStore | None = None,
 ) -> None:
-    """Run the phase-three transcription flow until interrupted or timed out."""
+    """Run transcription until interrupted or the optional time window elapses."""
     settings_store = settings_store or SettingsStore()
     stt_config = settings_store.get_stt_config()
     conversation_log = ConversationLog()
@@ -430,8 +441,11 @@ async def run_async(args: Namespace) -> None:
     discord_client = DiscordClient(token)
 
     try:
-        if args.receive_smoke and args.transcribe:
-            raise ValueError("--receive-smoke and --transcribe cannot be used together.")
+        headless_modes = (args.receive_smoke, args.transcribe, args.converse)
+        if sum(1 for m in headless_modes if m) > 1:
+            raise ValueError(
+                "Use at most one of --receive-smoke, --transcribe, or --converse."
+            )
 
         if args.list_voice_channels:
             await discord_client.connect()
@@ -439,13 +453,48 @@ async def run_async(args: Namespace) -> None:
             return
 
         channel_id = resolve_channel_id(args.channel_id)
-        if args.transcribe:
+        if args.transcribe or args.converse:
             validate_voice_dependencies()
-        else:
+        if not args.transcribe and not args.converse:
             audio_path = validate_voice_runtime(resolve_audio_path(args.audio_path))
 
         await discord_client.connect()
         voice_client = await discord_client.join_voice_channel(channel_id)
+
+        if args.converse:
+            elevenlabs_key = resolve_elevenlabs_api_key(settings_store)
+            if not elevenlabs_key:
+                raise ValueError(
+                    "Set ELEVENLABS_API_KEY (or elevenlabs_api_key in settings) for --converse."
+                )
+            gemini_key = settings_store.resolve_api_secret(
+                "google_gemini_api_key",
+                "GOOGLE_GEMINI_API_KEY",
+            )
+            if not gemini_key:
+                raise ValueError(
+                    "Set GOOGLE_GEMINI_API_KEY (or google_gemini_api_key in settings) for --converse."
+                )
+            listen_window_seconds = resolve_transcription_window_seconds(
+                args.listen_window_seconds
+            )
+            runner_config = ConversationRunnerConfig(
+                stt_idle_timeout_seconds=resolve_stt_idle_timeout_seconds(),
+                reply_silence_seconds=resolve_reply_silence_seconds(settings_store),
+                reply_cooldown_seconds=resolve_reply_cooldown_seconds(settings_store),
+                mention_window_seconds=resolve_mention_window_seconds(settings_store),
+                greet_on_join=resolve_greet_on_join(settings_store),
+                reply_locale=resolve_bot_reply_language_code(settings_store),
+            )
+            await run_voice_conversation(
+                discord_client=discord_client,
+                voice_client=voice_client,
+                listen_window_seconds=listen_window_seconds,
+                elevenlabs_api_key=elevenlabs_key,
+                settings_store=settings_store,
+                runner_config=runner_config,
+            )
+            return
 
         if args.transcribe:
             listen_window_seconds = resolve_transcription_window_seconds(args.listen_window_seconds)
@@ -475,34 +524,45 @@ async def run_async(args: Namespace) -> None:
         await discord_client.disconnect()
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Synchronous entrypoint for the smoke runner or ``--tui`` dashboard."""
-    load_dotenv()
-    args = parse_args(argv)
+def _run_tui_cli(args: Namespace) -> int:
+    """Start the Textual dashboard.
 
-    if args.tui:
-        if args.list_voice_channels or args.receive_smoke or args.transcribe:
-            print("--tui cannot be combined with --list-voice-channels, --receive-smoke, or --transcribe.")
-            return 1
-        if args.channel_id is not None or args.audio_path is not None:
-            print("--tui does not use --channel-id or --audio-path; pick a channel in the UI.")
-            return 1
-        if args.listen_window_seconds is not None:
-            print("--tui does not use --listen-window-seconds.")
-            return 1
-        try:
-            from src.ui.dashboard.app import run_tui_application
-
-            run_tui_application()
-        except KeyboardInterrupt:
-            return 130
-        except (RuntimeError, ValueError) as exc:
-            print(f"{exc}")
-            return 1
-        return 0
-
+    Textual's ``App.run()`` uses ``asyncio.run()`` internally, so this must not be
+    invoked from inside another ``asyncio.run`` (e.g. the headless CLI wrapper).
+    """
+    if (
+        args.list_voice_channels
+        or args.receive_smoke
+        or args.transcribe
+        or args.converse
+    ):
+        print(
+            "--tui cannot be combined with --list-voice-channels, --receive-smoke, "
+            "--transcribe, or --converse."
+        )
+        return 1
+    if args.channel_id is not None or args.audio_path is not None:
+        print("--tui does not use --channel-id or --audio-path; pick a channel in the UI.")
+        return 1
+    if args.listen_window_seconds is not None:
+        print("--tui does not use --listen-window-seconds.")
+        return 1
     try:
-        asyncio.run(run_async(args))
+        from src.ui.dashboard.app import run_tui_application
+
+        run_tui_application()
+    except KeyboardInterrupt:
+        return 130
+    except (RuntimeError, ValueError) as exc:
+        print(f"{exc}")
+        return 1
+    return 0
+
+
+async def _run_headless_async(args: Namespace) -> int:
+    """Discord smoke / converse / transcribe paths (single asyncio event loop)."""
+    try:
+        await run_async(args)
     except KeyboardInterrupt:
         logger.warning("Interrupted by user.")
         return 130
@@ -511,6 +571,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     return 0
+
+
+async def run(argv: Sequence[str] | None = None) -> int:
+    """Async CLI entry for headless modes (tests ``await`` this). ``--tui`` is synchronous."""
+    load_dotenv()
+    args = parse_args(argv)
+
+    if args.tui:
+        return _run_tui_cli(args)
+
+    return await _run_headless_async(args)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Synchronous entrypoint for the smoke runner or ``--tui`` dashboard."""
+    load_dotenv()
+    args = parse_args(argv)
+
+    if args.tui:
+        try:
+            return _run_tui_cli(args)
+        except KeyboardInterrupt:
+            logger.warning("Interrupted by user.")
+            return 130
+
+    try:
+        return asyncio.run(_run_headless_async(args))
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user.")
+        return 130
 
 
 if __name__ == "__main__":

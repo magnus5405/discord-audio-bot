@@ -1,131 +1,92 @@
-# Quick Start Guide
+# Quick start
 
-## Initial Setup
+## 1. Python environment
 
-### 1. Install Python & Dependencies
-
-The project uses Python 3.11+ with all dependencies defined in `pyproject.toml`.
+Requires **Python 3.11+**.
 
 ```bash
-# Virtual environment already created with dependencies installed
-# If you need to reinstall or update:
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 pip install -e .
 ```
 
-### 2. Environment Configuration
+Use `pip install -e ".[dev]"` if you plan to run tests, Ruff, or mypy.
 
-Copy the example environment file and fill in your credentials:
+## 2. Configure `.env`
 
 ```bash
 cp .env.example .env
-# Edit .env with your text editor
 ```
 
-**Required credentials to obtain first:**
+Fill in at minimum:
 
-- **Discord Bot Token** - [Discord Developer Portal](https://discord.com/developers/applications)
-- **Google Gemini API Key** - [Google AI Studio](https://aistudio.google.com/)
-- **Google Speech-to-Text API Key** - from Google Cloud Console credentials
-- **ElevenLabs API Key** - [ElevenLabs](https://elevenlabs.io/)
+- `DISCORD_TOKEN`, `DISCORD_SERVER_ID`
+- `GOOGLE_GEMINI_API_KEY`
+- `GOOGLE_STT_API_KEY` (when using Speech-to-Text **v1**), or the v2 service-account variables from `.env.example`
+- `ELEVENLABS_API_KEY` for spoken replies
 
-See [README.md](README.md) for detailed setup instructions for each service.
+See [README.md](README.md) for portal links and intent notes.
 
-### 3. Settings & Personas
+## 3. `settings.json`
 
-The project includes a default `settings.json` with a example persona
+Create or edit **`settings.json`** in the project root (personas, STT language, UI defaults). You can:
 
-You can edit this file to add/modify personas or they'll be editable via the settings TUI later.
+- Copy the example block from [README.md](README.md), or
+- Run **`python -m src.ui.settings`** to edit and save without Discord, or
+- Use **Settings** inside **`python -m src.main --tui`** after you have a working `.env`.
 
-## Running the Bot
+**Overrides**: values saved in `settings.json` (especially API keys and Discord fields from the TUI) take precedence over the same keys in `.env`. Keep `.env` for defaults and secrets on fresh machines; use the editor when you want everything in one file.
 
-### Command Line
+## 4. Run the bot
 
 ```bash
-# Activate virtual environment (if needed)
-.venv\Scripts\activate   # Windows
-source .venv/bin/activate  # macOS/Linux
-
-# Run the bot
-python src/main.py
+python -m src.main --tui
 ```
 
-The bot will:
-1. Load environment variables
-2. Connect to Discord
-3. Open the Textual control TUI in your terminal
+Pick a server, voice channel, and persona, then **Start**.
 
-## Development Phases
+### Other entrypoints
 
-The implementation follows a phased approach starting with the basics:
+| Command | Purpose |
+|--------|---------|
+| `python -m src.main` | Headless: uses `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH` if set |
+| `python -m src.main --list-voice-channels` | Print guild and voice channel IDs |
+| `python -m src.main --channel-id … --audio-path …` | Join and play one file |
+| `python -m src.main … --receive-smoke` | Receive smoke test around playback |
+| `python -m src.main … --transcribe` | STT-only session |
+| `python -m src.main … --converse` | Full STT + GenAI + TTS loop |
+| `python -m src.ui.settings` | Settings editor only |
 
-**Phase 1**: Voice connectivity + playback (test audio)
-**Phase 2**: Voice receive + pause/resume (capture speech)
-**Phase 3**: STT integration (transcription)
-**Phase 4**: Conversation policy + GenAI response
-**Phase 5**: ElevenLabs TTS + full loop
-**Phase 6**: Textual TUI polish & settings editor
+Full behavior and architecture: [README.md](README.md).
 
-See [PLAN.md](PLAN.md) for complete architecture documentation.
+## 5. Troubleshooting
 
-## Project Structure
-
-```
-src/
-├── main.py              # Entry point & orchestrator
-├── models.py            # Core data structures
-├── discord_client.py    # Discord API integration
-├── voice_*.py           # Voice connectivity (receive/playback)
-├── stt_google.py        # Speech-to-Text transcription
-├── genai_chat.py        # GenAI conversation
-├── tts_elevenlabs.py    # Text-to-Speech synthesis
-├── trigger_policy.py    # Reply trigger state machine
-├── conversation_log.py  # Transcript management
-├── persona.py           # Persona management
-├── settings_store.py    # Settings persistence
-└── tui_*.py             # Textual UI applications
-```
-
-## Troubleshooting
-
-### Dependencies not installing?
 ```bash
 pip install --upgrade pip setuptools wheel
 pip install -e .
 ```
 
-### Discord voice errors?
-Ensure discord.py[voice] is installed with PyNaCl:
-```bash
-pip install 'discord.py[voice]' --upgrade
-```
-
-### Google Cloud credential issues?
-Verify `GOOGLE_STT_API_KEY` in `.env` is set and that the Speech-to-Text API is enabled for that Google Cloud project.
-
-## Next Steps
-
-1. **Fill in `.env`** with your Discord token, Gemini API key, STT API key, and ElevenLabs key
-2. **Review [PLAN.md](PLAN.md)** for architecture details
-3. **Check [README.md](README.md)** for setup specifics per service
-4. **Start implementing Phase 1** - see comments marked "Phase 1" in code
-5. **Use GitHub Copilot** with guidance from `.github/copilot-instructions.md`
-
-## Code Style
-
-The project enforces consistent style before committing:
+Discord voice stack:
 
 ```bash
-# Format code
-black src/
-
-# Sort imports
-isort src/
-
-# Check for style issues
-ruff check src/
+pip install --upgrade 'discord.py[voice]'
 ```
 
----
+Google STT: confirm `GOOGLE_STT_API_KEY` and that Speech-to-Text is enabled on the GCP project tied to that key.
 
-For comprehensive setup details, see [README.md](README.md).
-For architecture & design, see [PLAN.md](PLAN.md).
+## 6. Repo layout (where to look)
+
+Application code lives under **`src/`** in packages such as `discord/`, `transcription/`, `conversation/`, `session/`, `storage/`, `tts/`, and `ui/`. See the **package map** in [README.md](README.md) for file names.
+
+## 7. Quality checks (optional)
+
+```bash
+ruff check src/ tests/
+mypy src/ --ignore-missing-imports --strict
+pytest
+```
+
+Contributor notes: [`.github/copilot-instructions.md`](.github/copilot-instructions.md).

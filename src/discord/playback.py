@@ -18,8 +18,6 @@ class VoicePlaybackManager:
 
     Uses VoiceClient.play() with FFmpeg-based AudioSource.
     Handles playback completion events and "speaking mode" state.
-
-    Phase 1: Voice connectivity + playback
     """
 
     def __init__(self, voice_client: discord.VoiceClient) -> None:

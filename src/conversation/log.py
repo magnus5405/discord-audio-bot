@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 
-from ..models import TranscriptSegment, ConversationTurn
+from ..models import ConversationTurn, TranscriptSegment
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +15,6 @@ class ConversationLog:
     Maintains and merges per-user transcript segments into ordered log.
 
     Handles overlaps, user attribution, and "since last bot turn" slicing.
-
-    Phase 4: Conversation policy
     """
 
     def __init__(self) -> None:

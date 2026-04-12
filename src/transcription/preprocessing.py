@@ -51,7 +51,7 @@ def resample_linear16_mono(
 ) -> bytes:
     """Resample mono 16-bit PCM using integer-ratio decimation.
 
-    This keeps phase-three dependencies light while supporting the common
+    This keeps transcription-path dependencies light while supporting the common
     Discord 48 kHz -> STT 16 kHz path.
     """
     if from_sample_rate <= 0 or to_sample_rate <= 0:

@@ -11,8 +11,6 @@ class VADProcessor:
 
     Detects voiced vs unvoiced audio to segment utterances more cleanly
     before sending to STT (optional enhancement).
-
-    Phase 3: Optional audio preprocessing
     """
 
     def __init__(

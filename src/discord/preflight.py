@@ -23,7 +23,7 @@ def validate_voice_dependencies() -> None:
 
 
 def validate_voice_runtime(audio_path: Path) -> Path:
-    """Validate local dependencies required for phase-one voice playback."""
+    """Validate local dependencies required for voice playback from a file."""
     resolved_path = audio_path.expanduser()
     validate_voice_dependencies()
 

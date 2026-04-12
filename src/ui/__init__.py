@@ -6,7 +6,6 @@ Textual TUI applications for main control and settings management.
 from .dashboard.app import BotDashboardApp, run_tui_application
 from .settings import BotSettingsScreen, PersonaSettingsScreen, SettingsRunnerApp, run_settings_ui
 
-
 BotUI = BotDashboardApp
 
 

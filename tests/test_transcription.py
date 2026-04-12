@@ -1,16 +1,15 @@
-"""Tests for phase-three transcription, preprocessing, and transcript storage."""
+"""Tests for transcription, preprocessing, and transcript storage."""
 
 from __future__ import annotations
 
 import asyncio
 import json
-
-import pytest
 from array import array
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pytest
 from google.auth.exceptions import DefaultCredentialsError
 
 from src.models import AudioFrame, TranscriptSegment
@@ -316,7 +315,7 @@ def test_google_stt_client_uses_explicit_api_key(monkeypatch):
     created_clients: list[object] = []
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             self.client_options = client_options
             created_clients.append(self)
 
@@ -337,7 +336,7 @@ def test_google_stt_client_uses_adc_when_api_key_unset(monkeypatch):
     created_clients: list[object] = []
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             self.client_options = client_options
             created_clients.append(self)
 
@@ -363,7 +362,7 @@ def test_google_stt_client_credentials_file_beats_constructor_api_key(monkeypatc
     created_clients: list[object] = []
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             self.client_options = client_options
             created_clients.append(self)
 
@@ -376,6 +375,10 @@ def test_google_stt_client_credentials_file_beats_constructor_api_key(monkeypatc
     monkeypatch.setattr(
         "src.transcription.stt.google.auth.default",
         lambda *a, **k: (object(), "from-sa"),
+    )
+    monkeypatch.setattr(
+        "src.transcription.stt.service_account.Credentials.from_service_account_file",
+        lambda _path: MagicMock(),
     )
     with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
         stt_client = GoogleSTTClient(
@@ -403,9 +406,13 @@ def test_google_stt_client_skips_ai_studio_project_for_sa_json_project(monkeypat
         "src.transcription.stt.google.auth.default",
         lambda *a, **k: (object(), None),
     )
+    monkeypatch.setattr(
+        "src.transcription.stt.service_account.Credentials.from_service_account_file",
+        lambda _path: MagicMock(),
+    )
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             pass
 
     with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
@@ -423,7 +430,7 @@ def test_google_stt_client_service_account_file_ignores_stt_api_key_env(monkeypa
     created_clients: list[object] = []
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             self.client_options = client_options
             created_clients.append(self)
 
@@ -438,6 +445,10 @@ def test_google_stt_client_service_account_file_ignores_stt_api_key_env(monkeypa
     monkeypatch.setattr(
         "src.transcription.stt.google.auth.default",
         lambda *a, **k: (object(), "svc-proj"),
+    )
+    monkeypatch.setattr(
+        "src.transcription.stt.service_account.Credentials.from_service_account_file",
+        lambda _path: MagicMock(),
     )
     with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
         stt_client = GoogleSTTClient(primary_language="da-DK")
@@ -466,9 +477,13 @@ def test_google_stt_client_reads_project_id_from_credentials_json(monkeypatch, t
         "src.transcription.stt.google.auth.default",
         lambda *a, **k: (object(), None),
     )
+    monkeypatch.setattr(
+        "src.transcription.stt.service_account.Credentials.from_service_account_file",
+        lambda _path: MagicMock(),
+    )
 
     class FakeAsyncClient:
-        def __init__(self, *, client_options=None):
+        def __init__(self, *, client_options=None, credentials=None, **_kwargs):
             self.client_options = client_options
 
     with patch("src.transcription.stt.speech_v2.SpeechAsyncClient", FakeAsyncClient):
@@ -533,22 +548,17 @@ def test_google_stt_factory_v2_with_ai_studio_project_raises() -> None:
     assert "v2" in msg and "gen-lang" in msg
 
 
-def test_google_stt_client_raises_clear_error_when_no_project_id(monkeypatch):
-    """Speech v2 requires a GCP project id for the implicit recognizer path."""
+def test_google_stt_client_falls_back_to_v1_when_only_api_key_no_project(monkeypatch):
+    """Without a v2 project or service account, ``GOOGLE_STT_API_KEY`` selects legacy Speech v1."""
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
     monkeypatch.setenv("GOOGLE_STT_API_KEY", "key-present")
     monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
 
-    try:
-        GoogleSTTClient(primary_language="da-DK")
-    except ValueError as exc:
-        message = str(exc)
-    else:
-        raise AssertionError("Expected GoogleSTTClient to raise ValueError")
-
-    assert "GOOGLE_STT_PROJECT_ID" in message or "GOOGLE_CLOUD_PROJECT" in message
+    stt_client = GoogleSTTClient(primary_language="da-DK")
+    assert isinstance(stt_client, GoogleSTTV1Client)
+    assert stt_client.api_key == "key-present"
 
 
 def test_transcription_coordinator_keeps_users_separate_and_splits_on_idle_gap():

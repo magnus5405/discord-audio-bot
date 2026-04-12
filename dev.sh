@@ -6,7 +6,7 @@ set -e
 case "${1:-help}" in
     lint)
         echo "Running ruff linter..."
-        ruff check src/
+        ruff check src/ tests/
         echo "✓ Ruff checks passed"
         ;;
     
@@ -28,7 +28,7 @@ case "${1:-help}" in
         echo "Running all checks..."
         black --check src/ tests/ 2>/dev/null || true
         isort --check-only src/ tests/ 2>/dev/null || true
-        ruff check src/
+        ruff check src/ tests/
         mypy src/ --ignore-missing-imports --strict || true
         echo "✓ All checks passed"
         ;;
