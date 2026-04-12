@@ -1,23 +1,9 @@
 {
   "personas": [
     {
-      "id": "friendly",
-      "name": "Friendly Bot",
+      "id": "default",
+      "name": "Default Bot",
       "system_instruction": "You are a helpful Discord bot in a voice channel conversation. Be concise (1-2 sentences), friendly, and conversational. Respond naturally to what people say.",
-      "genai_model": "gemini-3.1-flash-lite-preview",
-      "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"
-    },
-    {
-      "id": "witty",
-      "name": "Witty Bot",
-      "system_instruction": "You are a clever Discord bot known for witty remarks and humor. Keep replies brief and entertaining. Add a touch of humor when appropriate.",
-      "genai_model": "gemini-3.1-flash-lite-preview",
-      "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"
-    },
-    {
-      "id": "assistant",
-      "name": "Assistant Bot",
-      "system_instruction": "You are a professional Discord bot assistant. Be clear, helpful, and concise. Provide useful information when asked.",
       "genai_model": "gemini-3.1-flash-lite-preview",
       "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"
     }
@@ -25,7 +11,7 @@
   "ui": {
     "last_guild_id": null,
     "last_channel_id": null,
-    "last_persona_id": "friendly"
+    "last_persona_id": "default"
   },
   "stt": {
     "language_code": "da-DK",

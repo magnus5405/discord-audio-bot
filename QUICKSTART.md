@@ -32,10 +32,7 @@ See [README.md](README.md) for detailed setup instructions for each service.
 
 ### 3. Settings & Personas
 
-The project includes a default `settings.json` with three example personas:
-- **Friendly Bot** - Helpful and conversational
-- **Witty Bot** - Humorous and clever
-- **Assistant Bot** - Professional and clear
+The project includes a default `settings.json` with a example persona
 
 You can edit this file to add/modify personas or they'll be editable via the settings TUI later.
 
