@@ -27,7 +27,7 @@ Tagged releases publish **Windows** artifacts on [GitHub Releases](https://githu
 | **`DiscordAudioBotTUI-Setup.exe`** | Inno Setup installer — installs under Program Files, adds a Start Menu entry, and optionally a desktop shortcut. |
 | **`DiscordAudioBotTUI-windows.zip`** | Portable folder — extract anywhere and run `DiscordAudioBotTUI.exe`. |
 
-Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor (see [Configuration](#3-configuration-env-and-settingsjson) below).
+Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor.
 
 **macOS / Linux** — install and run **from source**; follow [Development](#development) (clone, venv, `pip install -e .`, FFmpeg on `PATH`).
 No official releases for macOS and Linux, but contributions are welcome to implement this.
