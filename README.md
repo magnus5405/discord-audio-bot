@@ -20,6 +20,15 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
 
 ---
 
+## Unimplemented features
+
+These are features that could be implemented into this project
+
+ - **SDK agnostic interface for AI conversation** This would enable access to all providers and even locally hosting models.
+ - **Local Speect-to-Text** An option to switch to local Speech-to-Text.
+
+---
+
 ## Installation
 
 ### Windows
