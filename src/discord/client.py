@@ -7,8 +7,9 @@ import logging
 from contextlib import suppress
 from typing import Awaitable, Callable, Optional
 
-import discord
 from discord.ext.voice_recv import AudioSink, VoiceRecvClient
+
+import discord
 
 from .voice_recv_patch import apply_discord_ext_voice_recv_patches
 
@@ -21,8 +22,8 @@ class DiscordClient:
     """
     Manage Discord gateway, voice connection, and receive lifecycle.
 
-    Phase 1 established connection and playback. Phase 2 adds explicit helpers
-    for starting and stopping voice receive sessions.
+    Handles gateway connection, voice join, playback hooks, and explicit
+    start/stop for voice receive sessions.
     """
 
     def __init__(

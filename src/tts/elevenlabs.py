@@ -73,8 +73,6 @@ class ElevenLabsTTSClient:
 
     Generates audio via streaming endpoint, supports MP3 output.
     Tracks per-session voice generation duration.
-
-    Phase 5: ElevenLabs TTS + playback
     """
 
     def __init__(

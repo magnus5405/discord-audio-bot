@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from .dashboard.app import BotDashboardApp, run_tui_application
 
-
-# Back-compat alias used in STRUCTURE.md / older imports
+# Back-compat alias for older imports (`BotUI` -> `BotDashboardApp`).
 BotUI = BotDashboardApp
 
 

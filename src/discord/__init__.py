@@ -5,8 +5,8 @@ voice channel management, audio receive, and playback.
 """
 
 from .client import DiscordClient
-from .voice_sink import DiscordAudioSink
 from .playback import VoicePlaybackManager
+from .voice_sink import DiscordAudioSink
 
 __all__ = [
     "DiscordClient",

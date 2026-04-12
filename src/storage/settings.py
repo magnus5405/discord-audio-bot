@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Optional, Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from ..models import Persona
 
@@ -51,8 +51,6 @@ class SettingsStore:
     Loads and saves bot settings from JSON file.
 
     Manages personas, UI preferences, and STT language config.
-
-    Phase 6: Settings management
     """
 
     def __init__(self, settings_path: Optional[Path] = None) -> None:

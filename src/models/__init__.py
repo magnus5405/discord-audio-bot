@@ -5,8 +5,8 @@ the application, keeping models isolated and maintainable.
 """
 
 from .audio import AudioFrame
-from .transcript import TranscriptSegment, ConversationTurn
 from .config import Persona, UsageCounters
+from .transcript import ConversationTurn, TranscriptSegment
 
 __all__ = [
     "AudioFrame",

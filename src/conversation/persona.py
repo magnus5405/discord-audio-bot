@@ -1,7 +1,7 @@
 """Persona management and configuration."""
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 
 from ..models import Persona
 
@@ -14,8 +14,6 @@ class PersonaManager:
 
     Loads personas from settings, applies current persona to chat,
     supports persona changes mid-session.
-
-    Phase 4: Conversation + GenAI
     """
 
     def __init__(self, personas: Optional[List[Persona]] = None) -> None:

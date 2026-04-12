@@ -4,273 +4,99 @@ description: "Guidelines for developing the Discord Audio Bot using GitHub Copil
 
 # GitHub Copilot Instructions for discord-audio-bot
 
-## Project Overview for Copilot
+## Project overview
 
-You are assisting with development of a **Discord voice-channel conversational AI bot** written in Python 3.11+. The bot:
-- Joins Discord voice channels
-- Transcribes per-user speech in real-time (Google Cloud Speech-to-Text)
-- Maintains multi-turn conversations (Google GenAI / Gemini)
-- Generates synthesized replies (ElevenLabs TTS)
-- Plays audio back into the Discord channel
-- Is controlled entirely via a Textual TUI (no slash commands)
+You are assisting with a **Discord voice-channel conversational bot** (Python 3.11+). It:
 
-**Do NOT generate Discord text commands or message handlers.** All control flows through the TUI.
+- Joins voice channels and receives audio (`discord.py`, `discord-ext-voice-recv`, DAVE/`davey`)
+- Streams per-user audio to **Google Cloud Speech-to-Text**
+- Runs reply logic and **Google GenAI (Gemini)** multi-turn chat
+- Synthesizes replies with **ElevenLabs** and plays them back into the channel
+- Is controlled from a **Textual** terminal UI (dashboard + settings editor), not slash commands
 
-## Architecture Principles
+**Do not add Discord text commands, message content handlers, or `discord.py.ext.commands` bots.** Control and configuration are TUI-driven or CLI smoke flags.
 
-### Module Organization
-Follow the responsibility-driven structure in `src/`:
+## Module map (`src/`)
 
-- **Discord integration**: `discord_client.py`, `voice_receive.py`, `voice_playback.py`
-- **Transcription**: `stt_google.py`, `audio_preprocess.py`, `vad.py` (optional)
-- **Conversation**: `genai_chat.py`, `trigger_policy.py`, `conversation_log.py`, `persona.py`
-- **Synthesis**: `tts_elevenlabs.py`
-- **UI**: `tui_main.py`, `tui_settings.py`, `settings_store.py`
-- **Orchestration**: `main.py`
+Use these real paths (not legacy single-file names):
 
-Each module should have a single, clear responsibility. Import only what is needed.
+| Area | Location |
+|------|-----------|
+| CLI entry | `src/main.py` |
+| Voice session orchestration | `src/session/conversation_runner.py`, `src/session/metrics.py` |
+| Discord gateway / voice | `src/discord/client.py`, `playback.py`, `voice_sink.py`, `voice_recv_patch.py`, `preflight.py` |
+| STT pipeline | `src/transcription/coordinator.py`, `stt.py`, `stt_v1.py`, `preprocessing.py`, `vad.py` |
+| Conversation | `src/conversation/chat.py`, `policy.py`, `log.py`, `persona.py` |
+| Data models | `src/models/audio.py`, `config.py`, `transcript.py` |
+| Persistence / resolution | `src/storage/settings.py`, `transcripts.py`, `reply_locale.py` |
+| TTS | `src/tts/elevenlabs.py` |
+| TUI | `src/ui/dashboard/`, `src/ui/settings/`, `src/ui/widgets/`, `src/ui/main.py` |
 
-### Threading & Async Boundaries (Critical)
+Import from the `src` package layout already used in tests (for example `from src.discord import …`).
 
-Three concurrency domains must be kept separate to avoid deadlocks:
+## Threading and async boundaries
 
-1. **Discord asyncio loop** (`discord.py` runs on its own event loop)
-   - Use `discord_client.py` as the single entry point to the Discord event loop
-   - All Discord API calls must happen on the Discord asyncio context
+1. **Discord asyncio loop** — all `discord.py` API calls on that loop.
+2. **Voice receive sink callbacks** — may run off the cooperative asyncio path; do minimal work, push frames to an `asyncio.Queue` with `loop.call_soon_threadsafe(queue.put_nowait, …)`. Never block or call Discord APIs inside the sink.
+3. **Textual** — separate app loop; coordinate with Discord via explicit runner/session boundaries and shared `SettingsStore` / metrics, not ad-hoc cross-thread Discord calls.
 
-2. **Voice receive sink callbacks** (often called from a receive thread, not async)
-   - Minimize work in sink callbacks
-   - Forward audio frames to an `asyncio.Queue` using `loop.call_soon_threadsafe(queue.put_nowait, ...)`
-   - Never block or call Discord API from a sink callback
+**Pattern**: callback → thread-safe queue → async consumer → Discord or UI update.
 
-3. **Textual UI event loop** (has its own async runtime)
-   - TUI runs independently and communicates with the Discord loop via message passing
-   - Use reactive attributes for live counter updates
-   - Use Workers for long-running tasks
+## Configuration
 
-**Pattern**: Callbacks → thread-safe queue → async task consumer → Discord context or TUI update.
+- **`.env`**: loaded at startup (`python-dotenv`); holds secrets and defaults.
+- **`settings.json`**: personas, STT language, UI state, and optional persisted API keys. **Settings from JSON override `.env`** where `SettingsStore` resolves both (see `resolve_api_secret`, Discord helpers, runtime floats/bools).
 
-### Type Hints & Data Models
+When suggesting new options, extend `SettingsStore` and the settings TUI consistently; document in [README.md](../README.md).
 
-Use **type hints in all functions** and **dataclasses for events/data passing**:
+## Error handling
 
-```python
-from dataclasses import dataclass
-from typing import Optional
-import time
-
-@dataclass
-class AudioFrame:
-    user_id: int
-    pcm_bytes: bytes
-    sample_rate_hz: int
-    channels: int
-    timestamp_monotonic: float
-
-@dataclass
-class TranscriptSegment:
-    user_id: int
-    username: str
-    text: str
-    start_ts: float
-    end_ts: float
-    is_final: bool
-    language_code: Optional[str] = None
-```
-
-This makes cross-module communication explicit and enables IDE autocomplete.
-
-### Error Handling: Fail Fast
-
-Per the PLAN, **do not retry on errors**. Any fatal exception stops the session:
+Per project convention, **avoid silent retries** for fatal integration errors—log and surface failure so the session can stop cleanly. Example shape:
 
 ```python
-# Good: Let exceptions propagate
 try:
     await discord_client.join_voice_channel(channel_id)
 except Exception as e:
-    logger.error(f"Failed to join voice channel: {e}", exc_info=True)
-    raise  # Stop the session
+    logger.error("Failed to join voice channel: %s", e, exc_info=True)
+    raise
 ```
 
-This aligns with the stated requirement: "crash/stop the session on error (no retries)."
+Do not paper over missing credentials or broken voice state.
 
-## Code Style & Conventions
+## Type hints and models
 
-### Naming
-- **Module names**: `snake_case` (e.g., `audio_preprocess.py`, `stt_google.py`)
-- **Class names**: `PascalCase` (e.g., `DiscordClient`, `GoogleSTTClient`)
-- **Functions/methods**: `snake_case` with clear intent (e.g., `pause_listening()`, `emit_transcript_segment()`)
-- **Constants**: `UPPER_SNAKE_CASE` (e.g., `SILENCE_TIMEOUT_SECONDS = 5`)
+Prefer dataclasses and explicit types for frames and transcript segments (see `src/models/`). Match existing style: type hints on public functions, minimal comments.
 
-### Imports
-- Standard library first
-- Third-party (discord, google, textual, etc.)
-- Local imports in `src/`
-- Use `from module import Class` for clarity; avoid `from module import *`
+## Library notes (high level)
 
-Example:
-```python
-import asyncio
-import logging
-from dataclasses import dataclass
-from typing import Optional
+- **discord.py + voice_recv**: pause inbound transcription while the bot plays TTS; resume after playback completes.
+- **Speech-to-Text**: supports v1 (API key) and v2 (service account + project/location/model); configuration flows through `SettingsStore`.
+- **Google GenAI**: use the `google-genai` patterns already in `src/conversation/chat.py` (not the older `google-generativeai` package name in examples elsewhere on the web).
+- **ElevenLabs**: streaming HTTP; voice id per persona in `settings.json`.
+- **Textual**: reactive state and workers for long tasks; keep UI updates on the Textual loop.
 
-import discord
-from google.cloud import speech_v1
+## Testing and manual validation
 
-from .audio_preprocess import convert_to_linear16
-from .conversation_log import ConversationLog
-```
+- **pytest** and **pytest-asyncio** for unit and async tests under `tests/`.
+- Prefer deterministic fakes for Discord and STT (see `tests/test_discord.py` patterns).
+- **Manual order** when validating locally: playback-only → `--receive-smoke` → `--transcribe` → `--converse` → `--tui`.
 
-### Logging
-Use the standard library `logging` module, never `print()` for application output:
+Session JSON under `transcripts/` helps debug STT and conversation output.
 
-```python
-import logging
+## Git workflow
 
-logger = logging.getLogger(__name__)
+- Commits: present tense, specific (what changed and why).
+- Branches: `feature/…`, `fix/…` as appropriate.
+- Before sharing a branch: `black src/ tests/`, `isort src/ tests/`, `ruff check src/ tests/`, `mypy src/ --ignore-missing-imports --strict`, `pytest`.
 
-logger.info("Bot connected to voice channel")
-logger.error(f"STT failed: {e}", exc_info=True)
-logger.debug(f"Received {len(data)} bytes from user {user_id}")
-```
+## Pitfalls to avoid
 
-## Library-Specific Guidance
+1. Slash commands or message-based control surfaces
+2. Reading text channels for bot control
+3. Automatic retry loops that hide API or voice misconfiguration
+4. Blocking the Discord event loop
+5. Heavy work inside voice sink `write` paths
 
-### discord.py + discord-ext-voice-recv
+## Authoritative docs
 
-- **VoiceClient.play()** is the entry point for sending audio. Keep playback calls on the Discord event loop.
-- **AudioSink** receives frames in a callback: do minimal work (validation, buffering) and forward to `asyncio.Queue` via `call_soon_threadsafe()`.
-- **DAVE is mandatory** as of March 1, 2026. Ensure dependencies are current. If `VoiceClient` raises "DAVE not found," update `discord.py[voice]`.
-- **Pause listening** when the bot starts speaking (set a flag or stop adding frames to transcript). Resume after playback completes via the `after` callback.
-
-### Google Cloud Speech-to-Text
-
-- **Streaming is gRPC-only.** Use `google.cloud.speech_v1p1beta1.SpeechClient` for streaming recognition.
-- **Audio encoding**: LINEAR16 is ideal; if using native Discord 48 kHz, accept it (Google says "native rate is better than resampling").
-- **Multi-language**: Set `language_code` and `alternative_language_codes` in the recognition config. Results include `language_code` field so you know which language was detected.
-- **Interim vs final**: Only persist final results (`is_final=True`) to the conversation log; use interim for mention detection / live TUI updates.
-
-### Google GenAI (python-genai)
-
-- **Chat sessions** are stateful: `client.chats.create()` creates a session; `send_message()` is multi-turn; history is preserved.
-- **System instruction** can be set via the config or by seeding the first message as a system turn.
-- **Usage metadata**: Every response includes `usage_metadata` with `prompt_token_count`, `candidates_token_count`, `total_token_count`. Sum `total_token_count` across calls for session totals.
-- **Environment variables**: Reads `GOOGLE_API_KEY` automatically if not passed explicitly.
-- **Token counting**: Call `count_tokens()` to estimate cost before sending, if needed.
-
-### ElevenLabs TTS
-
-- **Streaming endpoint**: `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream`
-- **Header**: `xi-api-key: <your_key>` (NOT a query parameter)
-- **Output format**: MP3 is fine (e.g., `mp3_44100_128`)
-- **Streaming response**: Returns chunked HTTP response; iterate over chunks and forward to FFmpeg or accumulate into a temp file.
-- **Voice IDs**: Available in the ElevenLabs account dashboard; store in `settings.json` per persona.
-- **Usage**: Call `/v1/usage/character-stats` for account-level metrics; compute per-session duration locally from generated audio.
-
-### Textual Framework
-
-- **Reactive attributes** keep UI in sync: define `@reactive.var` properties, and UI auto-updates when they change.
-- **Workers**: Use for long-running tasks that would block the UI thread. Workers run in the event loop and report back via messages.
-- **Cross-process communication**: If TUI runs in a separate terminal/process, use message queues or IPC (e.g., multiprocessing Queue, or HTTP if simpler).
-- **Containers & layouts**: Use `Container`, `Horizontal`, `Vertical` for layout; `Button`, `Select`, `Static` for widgets.
-
-Example:
-```python
-from textual.app import ComposeResult
-from textual.reactive import reactive
-from textual.widgets import Button, Static
-
-class BotStatus(Static):
-    tokens_spent = reactive(0)
-    voice_minutes = reactive(0.0)
-
-    def render(self) -> str:
-        return f"Tokens: {self.tokens_spent} | Voice: {self.voice_minutes:.1f}m"
-```
-
-## Common Patterns
-
-### Async Task Management
-```python
-async def run_session():
-    # Start main tasks as separate coroutines
-    await asyncio.gather(
-        discord_client.run(),
-        transcription_task(),
-        reply_trigger_task(),
-        await_ui_commands(),  # May be a queue or IPC
-    )
-```
-
-### Queue-Based Frame Forwarding (Sink Callback → Async)
-```python
-# In sink callback (non-async context):
-def on_audio_frame(user_id, pcm_data):
-    frame = AudioFrame(user_id, pcm_data, 48000, 2, time.monotonic())
-    try:
-        discord_loop.call_soon_threadsafe(audio_queue.put_nowait, frame)
-    except Exception as e:
-        logger.error(f"Failed to queue audio frame: {e}")
-
-# In async STT task:
-async def transcribe_audio():
-    while running:
-        frame = await audio_queue.get()
-        # Process frame, call STT, emit TranscriptSegment
-```
-
-### Persona & System Instruction Management
-```python
-# In genai_chat.py:
-def apply_persona(chat, persona: Persona):
-    # Option 1: Set via config
-    config = genai.types.GenerateContentConfig(
-        system_instruction=persona.system_instruction
-    )
-    # Or Option 2: Seed the chat with a system turn
-    chat.send_message(f"[System]: {persona.system_instruction}")
-```
-
-## Testing & Debugging
-
-- **pytest** for unit tests: test data models, transcript merging, trigger logic in isolation
-- **pytest-asyncio** for async function testing
-- **Logging**: Use `DEBUG`, `INFO`, `WARNING`, `ERROR` levels appropriately
-- **Transcript output**: Save per-session JSON to `transcripts/` for post-mortem debugging
-- **Manual testing**: Start with Phase One (playback) before integrating full pipeline
-
-## Git & Contribution Workflow
-
-- **Commit messages**: Use present tense, be specific  
-  - ✅ "Add Google STT streaming client and per-user transcript buffering"
-  - ❌ "Fixed bugs" or "WIP stuff"
-- **Branch naming**: `feature/component-name` (e.g., `feature/voice-receive`, `fix/mention-detection`)
-- **Before pushing**: Run `black src/`, `isort src/`, and `ruff check src/` to ensure code style
-
-## When Copilot Suggests non-Discord Solutions
-
-**Guard against these pitfalls:**
-
-1. **Don't suggest Discord slash commands** → All control is TUI-only
-2. **Don't add text message handlers** → The bot only speaks in voice
-3. **Don't use discord.py.ext.commands** → Not needed for this application
-4. **Don't retry network calls** → Fail fast per design spec
-5. **Don't block the Discord event loop** → Always use async/await or defer to a queue
-6. **Don't spawn threads for Discord calls** → Discord expects asyncio context
-
-## Phase-by-Phase Milestones (Reference)
-
-1. **Phase 1**: Voice connectivity + playback (can join and play test MP3)
-2. **Phase 2**: Voice receive + pause/resume (sink receives frames, listens pause during speech)
-3. **Phase 3**: STT integration (live per-user transcripts appear)
-4. **Phase 4**: Conversation policy + GenAI (5s silence trigger, mention detection, ChatSession)
-5. **Phase 5**: ElevenLabs TTS + playback loop (end-to-end voice conversation)
-6. **Phase 6**: Textual TUI polish (guild/channel selection, persona selection, settings editor)
-
-When implementing a new feature, tag code with "Phase N" or reference it in comments if the context is non-obvious.
-
----
-
-**Remember**: Refer to [PLAN.md](../PLAN.md) for the complete design decisions and rationale. When Copilot suggests an alternative approach, evaluate it against the documented constraints and design goals in PLAN.md.
+Use [README.md](../README.md) and [QUICKSTART.md](../QUICKSTART.md) plus the source tree above. When a suggestion conflicts with implemented resolution order or voice lifecycle, **prefer the code in `src/storage/settings.py` and `src/discord/`**.

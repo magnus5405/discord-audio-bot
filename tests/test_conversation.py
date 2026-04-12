@@ -4,8 +4,6 @@ import json
 import time
 from pathlib import Path
 
-import pytest
-
 from src.conversation import PersonaManager, ReplyTriggerPolicy, TriggerState
 from src.conversation.log import ConversationLog
 from src.models import Persona, TranscriptSegment

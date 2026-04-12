@@ -5,9 +5,9 @@ and conversation history logging.
 """
 
 from .chat import GenAIChatManager
-from .policy import ReplyTriggerPolicy, TriggerState
 from .log import ConversationLog
 from .persona import PersonaManager
+from .policy import ReplyTriggerPolicy, TriggerState
 
 __all__ = [
     "GenAIChatManager",

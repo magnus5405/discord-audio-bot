@@ -72,8 +72,6 @@ def _dave_session_for_sink(sink: Any) -> Any:
 def _patch_packet_decoder(vr_opus: Any, RTPPacket: type) -> None:
     PacketDecoder = vr_opus.PacketDecoder
     orig_init = PacketDecoder.__init__
-    orig_process = PacketDecoder._process_packet
-    orig_decode = PacketDecoder._decode_packet
 
     def patched_init(self: Any, router: Any, ssrc: int) -> None:
         orig_init(self, router, ssrc)
@@ -153,8 +151,6 @@ def _patch_packet_decoder(vr_opus: Any, RTPPacket: type) -> None:
 
 
 def _patch_packet_router(PacketRouter: type) -> None:
-    orig_do_run = PacketRouter._do_run
-
     def patched_do_run(self: Any) -> None:
         while not self._end_thread.is_set():
             self.waiter.wait()

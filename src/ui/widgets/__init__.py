@@ -5,8 +5,8 @@ from .dashboard import (
     ElevenlabsCharactersTile,
     MentionWindowTile,
     MetricTile,
-    STTMinutesTile,
     SessionTimerTile,
+    STTMinutesTile,
     TokensTile,
 )
 

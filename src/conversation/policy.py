@@ -23,8 +23,6 @@ class ReplyTriggerPolicy:
     - Mention: 30s window, reply on 5s silence or time elapse
     - Join: Greet immediately
     - Other User Join: Optional greeting, no trigger
-
-    Phase 4: Conversation policy
     """
 
     def __init__(

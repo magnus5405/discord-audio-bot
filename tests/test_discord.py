@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -602,7 +603,7 @@ def test_stop_playback_unblocks_pending_wait() -> None:
 
 
 def test_run_receive_smoke_sequences_listen_play_and_resume(monkeypatch) -> None:
-    """The phase-two smoke flow should listen, pause, play, and resume with a fresh sink."""
+    """Receive smoke mode should listen, pause, play, and resume with a fresh sink."""
 
     async def scenario() -> None:
         FakeSmokeDiscordClient.instances.clear()
@@ -649,7 +650,7 @@ def test_run_receive_smoke_sequences_listen_play_and_resume(monkeypatch) -> None
     run_async(scenario())
 
 
-def test_run_phase_one_playback_flow_remains_unchanged(monkeypatch) -> None:
+def test_run_playback_only_flow_avoids_receive_lifecycle(monkeypatch) -> None:
     """The original playback smoke flow should still avoid receive lifecycle calls."""
 
     async def scenario() -> None:
@@ -712,7 +713,7 @@ def test_configure_logging_suppresses_noisy_voice_recv_loggers(monkeypatch) -> N
 
 
 class FakeTranscriptionDiscordClient:
-    """Headless fake client for phase-three transcription orchestration."""
+    """Headless fake client for transcription-mode orchestration."""
 
     instances: list["FakeTranscriptionDiscordClient"] = []
 
@@ -757,7 +758,7 @@ class FakeTranscriptionDiscordClient:
 
 
 class FakeSettingsStore:
-    """Phase-three settings stub."""
+    """Minimal settings stub for transcription tests."""
 
     def get_stt_config(self) -> dict[str, object]:
         return {
@@ -765,13 +766,41 @@ class FakeSettingsStore:
             "alternative_language_codes": ["en-US"],
         }
 
+    def resolve_discord_secret(self, _key: str, *env_names: str) -> str | None:
+        for name in env_names:
+            value = os.getenv(name)
+            if value:
+                return value
+        return None
+
+    def resolve_stt_api_key(self) -> str | None:
+        return None
+
+    def resolve_stt_project_id(self) -> str | None:
+        return None
+
+    def resolve_stt_speech_backend(self) -> str | None:
+        return None
+
+    def resolve_stt_credentials_path(self) -> str | None:
+        return None
+
+    def resolve_stt_location(self) -> str | None:
+        return None
+
+    def resolve_stt_model(self) -> str | None:
+        return None
+
 
 class FakeStreamingSTTClient:
     """Fake STT client that yields one final transcript per utterance."""
 
-    def __init__(self, primary_language: str, alternative_languages: list[str]) -> None:
+    def __init__(self, primary_language: str, alternative_languages: list[str], **_kwargs) -> None:
         self.primary_language = primary_language
         self.alternative_languages = alternative_languages
+
+    async def validate_connectivity(self) -> None:
+        return None
 
     async def stream_recognize(
         self,
@@ -789,7 +818,7 @@ class FakeStreamingSTTClient:
             yield TranscriptSegment(
                 user_id=user_id,
                 username=username,
-                text="hello from phase three",
+                text="hello from transcription",
                 start_ts=utterance_started_at or 0.0,
                 end_ts=(utterance_started_at or 0.0) + 0.25,
                 is_final=True,
@@ -798,7 +827,7 @@ class FakeStreamingSTTClient:
 
 
 def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -> None:
-    """The phase-three flow should listen, transcribe, and persist session JSON."""
+    """Transcription mode should listen, transcribe, and persist session JSON."""
 
     async def scenario() -> None:
         FakeTranscriptionDiscordClient.instances.clear()
@@ -840,7 +869,7 @@ def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -
         assert payload["guild_id"] == 7
         assert payload["channel_id"] == 42
         assert payload["segments"][0]["username"] == "Alice"
-        assert payload["segments"][0]["text"] == "hello from phase three"
+        assert payload["segments"][0]["text"] == "hello from transcription"
         assert payload["usage"] == {
             "total_tokens": 0,
             "genai_input_tokens": 0,

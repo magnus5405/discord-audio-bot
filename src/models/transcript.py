@@ -6,10 +6,7 @@ from typing import Optional
 
 @dataclass
 class TranscriptSegment:
-    """Represents a transcript segment from a single user.
-    
-    Phase 3: STT integration
-    """
+    """Represents a transcript segment from a single user."""
 
     user_id: int
     username: str
@@ -22,10 +19,7 @@ class TranscriptSegment:
 
 @dataclass
 class ConversationTurn:
-    """Represents a single turn in the conversation log.
-    
-    Phase 4: Conversation policy
-    """
+    """Represents a single turn in the conversation log."""
 
     role: str  # "user" or "model"
     text: str
