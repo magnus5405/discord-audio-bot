@@ -2,6 +2,8 @@
 
 A Discord voice-channel conversational bot with a [Textual TUI](https://textual.textualize.io/). The bot joins voice channels, listens to speakers, transcribes speech in real time, maintains multi-turn conversations using [Google GenAI](https://github.com/googleapis/python-genai), and replies with synthesized speech via [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python).
 
+---
+
 ## Features
 
 - **Voice integration**: Joins Discord voice channels via [discord.py](https://github.com/Rapptz/discord.py) and [discord-ext-voice-recv](https://github.com/imayhaveborkedit/discord-ext-voice-recv) with DAVE encryption support
@@ -15,6 +17,8 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
 - **[Textual](https://textual.textualize.io/)**: No Discord slash commands—control runs from the terminal
 - **Characters**: System instructions, Gemini model, and ElevenLabs voice per character
 - **Session logging**: JSON transcripts and usage counters per session
+
+---
 
 ## Installation
 
@@ -168,6 +172,8 @@ pytest tests/test_models.py
 pytest --cov=src --cov-report=html
 ```
 
+---
+
 ## Architecture
 
 End-to-end data flow:
@@ -223,6 +229,8 @@ src/
 
 **Concurrency**: Discord runs on asyncio; voice sink callbacks may run off the main async path—forward work to `asyncio.Queue` with `loop.call_soon_threadsafe` instead of blocking. The Textual app has its own loop; the dashboard communicates with the Discord side via the session runner and shared settings/metrics—do not call Discord APIs from sink callbacks.
 
+---
+
 ## Other considerations
 
 ### Voice encryption (DAVE)
@@ -237,10 +245,16 @@ If `settings.json` has no `stt` block, the app defaults to `en-US` with English 
 
 Conversation state is not persisted across runs; transcript JSON under `transcripts/` is for debugging and analysis.
 
+---
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and pull request expectations.
 
+---
+
 ## License
 
 This project is released under the MIT License; see the [`LICENSE`](LICENSE) file.
+
+---
