@@ -4,8 +4,10 @@ on:
   workflow_call:
     secrets:
       SETTINGS_SECRET_KEY:
-        description: Fernet key (same as local .env) for settings encryption during build validation.
-        required: true
+        description: >-
+          Optional Fernet key. When unset, the job generates a throwaway key for the build environment only
+          (not embedded in the app). Set the repo secret to match your .env if a build step must decrypt real settings.
+        required: false
 
 jobs:
   build-windows-tui:
@@ -13,10 +15,20 @@ jobs:
     permissions:
       contents: read
       deployments: write
-    env:
-      SETTINGS_SECRET_KEY: ${{ secrets.SETTINGS_SECRET_KEY }}
     steps:
       - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Create GitHub deployment
         id: deployment
@@ -26,14 +38,19 @@ jobs:
           environment: windows-tui
           environment-url: https://${{ vars.DOMAIN }}
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
-
       - name: Install project and PyInstaller
         run: pip install -e ".[build]" --pre
+
+      - name: Ensure SETTINGS_SECRET_KEY for build env
+        shell: pwsh
+        run: |
+          $raw = "${{ secrets.SETTINGS_SECRET_KEY }}"
+          if ([string]::IsNullOrWhiteSpace($raw)) {
+            $k = python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+            "SETTINGS_SECRET_KEY=$k" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            "SETTINGS_SECRET_KEY=$raw" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          }
 
       - name: PyInstaller (onedir, FFmpeg bundled via spec)
         run: python -m PyInstaller packaging/discord-audio-bot-tui.spec --noconfirm

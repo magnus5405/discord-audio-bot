@@ -13,6 +13,8 @@ from .settings_crypto import (
     decrypt_sensitive_blocks,
     encrypt_sensitive_blocks,
     require_settings_fernet,
+    settings_load_requires_fernet_key,
+    settings_save_requires_fernet_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,7 +108,12 @@ class SettingsStore:
             with open(self.settings_path, "r", encoding="utf-8") as f:
                 self.settings = json.load(f)
 
-            decrypt_sensitive_blocks(self.settings, require_settings_fernet())
+            fernet = (
+                require_settings_fernet()
+                if settings_load_requires_fernet_key(self.settings)
+                else None
+            )
+            decrypt_sensitive_blocks(self.settings, fernet)
 
             personas_data = self.settings.get("personas", [])
             self.personas = [
@@ -147,7 +154,12 @@ class SettingsStore:
             self.settings["personas"] = personas_data
 
             to_write = copy.deepcopy(self.settings)
-            encrypt_sensitive_blocks(to_write, require_settings_fernet())
+            fernet = (
+                require_settings_fernet()
+                if settings_save_requires_fernet_key(to_write)
+                else None
+            )
+            encrypt_sensitive_blocks(to_write, fernet)
 
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(to_write, f, indent=2, ensure_ascii=False)

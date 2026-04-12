@@ -96,13 +96,22 @@ There are two layers:
 
 You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`).
 
-**Encrypting secrets in `settings.json`:** **`SETTINGS_SECRET_KEY` is required** in `.env` (Fernet key: 44-character url-safe base64). API keys under `settings.api` and the Discord token under `settings.discord` must be stored with an `enc:v1:` prefix; plaintext values for those fields are rejected on load. Use the same value as the **`SETTINGS_SECRET_KEY`** GitHub **repository secret** so release workflows can resolve settings the same way. Anyone with the key and the file can decrypt — treat it like a master password. If you still have plaintext secrets in an older `settings.json`, remove those keys or re-save them from the TUI once this key is set so they are rewritten encrypted.
+**Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` (Fernet key: 44-character url-safe base64) when you store API keys under `settings.api` or the Discord token under `settings.discord`. Those fields must use an `enc:v1:` prefix at rest; plaintext values are rejected on load. A template-only `settings.json` (no `api` / `discord` secrets) loads without this key. Anyone with the key and the file can decrypt — treat it like a master password. If you still have plaintext secrets in an older `settings.json`, remove those keys or re-save them from the TUI once this key is set so they are rewritten encrypted.
 
 **FFmpeg:** TTS playback uses FFmpeg. **Released Windows TUI builds** include FFmpeg next to `DiscordAudioBotTUI.exe`. When **developing from a clone**, install FFmpeg on `PATH` or set **`FFMPEG_PATH`** to the `ffmpeg` / `ffmpeg.exe` binary for a custom location.
 
 **Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
 
 The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
+
+### Release branch (`latest`)
+
+Production Windows releases are driven off the **`latest`** branch:
+
+1. Open a pull request **into `latest`**. CI runs **lint / typecheck / tests** (same as other PRs) plus a **version check**: `pyproject.toml` `[project] version` and `src/__init__.py` `__version__` must **match** each other, and the version must be **strictly greater** than on the current `latest` tip (semver).
+2. After merge, the [**Release**](.github/workflows/cd.yml) workflow runs on **`latest`**: it builds the Windows artifacts and creates a **GitHub Release** (and git tag **`v{version}`** from `[project] version`) via the release API. Pushes of `GITHUB_TOKEN` do not chain-trigger other workflows, so this path avoids a separate tag-push job.
+
+In GitHub: create the **`latest`** branch if it does not exist yet, then under **Settings → Rules → Rulesets** (or branch protection), require the **`require-version-bump`** check (and your usual CI jobs) before merging into `latest`. The **`SETTINGS_SECRET_KEY`** repository secret is optional for the Windows build job; if unset, CI generates a throwaway key for the runner only (it is not embedded in the app). For local installs, set **`SETTINGS_SECRET_KEY`** in `.env` whenever you persist encrypted API keys or a Discord token in `settings.json`.
 
 #### 4. Example `settings.json`
 

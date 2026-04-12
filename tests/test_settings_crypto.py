@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from cryptography.fernet import Fernet
 
 from src.storage import SettingsStore
@@ -57,6 +58,58 @@ def test_save_writes_encrypted_when_env_key_set(tmp_path: Path) -> None:
         store2 = SettingsStore(settings_path=path)
         assert store2.resolve_api_secret("google_gemini_api_key", "GOOGLE_GEMINI_API_KEY") == "k1"
         assert store2.resolve_discord_secret("token", "DISCORD_TOKEN") == "dt"
+
+
+def test_load_template_without_secrets_works_without_env_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SETTINGS_SECRET_KEY", raising=False)
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "personas": [
+                    {
+                        "id": "default",
+                        "name": "Default Bot",
+                        "system_instruction": "x",
+                        "genai_model": "gemini-2.5-flash",
+                        "elevenlabs_voice_id": "v",
+                    }
+                ],
+                "ui": {},
+                "stt": {"language_code": "en-US"},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(settings_path=path)
+    assert len(store.personas) == 1
+
+
+def test_save_personas_only_without_env_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SETTINGS_SECRET_KEY", raising=False)
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "personas": [
+                    {
+                        "id": "default",
+                        "name": "Default Bot",
+                        "system_instruction": "x",
+                        "genai_model": "gemini-2.5-flash",
+                        "elevenlabs_voice_id": "v",
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    store = SettingsStore(settings_path=path)
+    assert store.save() is True
 
 
 def test_load_rejects_plaintext_secrets(tmp_path: Path) -> None:
