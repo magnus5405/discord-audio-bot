@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Final
 
 ENC_PREFIX: Final[str] = "enc:v1:"
+
+# Written beside ``settings.json`` when ``SETTINGS_SECRET_KEY`` is unset (e.g. release exe + no .env).
+LOCAL_SETTINGS_KEY_FILENAME: Final[str] = ".discord_audio_bot_settings_key"
 
 # Keys under ``settings["api"]`` that are treated as secrets at rest.
 API_SECRET_KEYS: Final[tuple[str, ...]] = (
@@ -61,21 +65,46 @@ def settings_save_requires_fernet_key(settings: dict[str, Any]) -> bool:
     return False
 
 
-def require_settings_fernet():
-    """Return Fernet for ``SETTINGS_SECRET_KEY`` or raise if missing / invalid."""
+def _fernet_from_raw_key(raw: str) -> Any:
+    from cryptography.fernet import Fernet
+
+    return Fernet(raw.encode("utf-8"))
+
+
+def resolve_settings_fernet(key_dir: Path, *, create: bool) -> Any | None:
+    """Resolve Fernet: ``SETTINGS_SECRET_KEY`` env, else local key file beside settings, optionally create it."""
     raw = (os.getenv("SETTINGS_SECRET_KEY") or "").strip()
-    if not raw:
-        raise RuntimeError(
-            "SETTINGS_SECRET_KEY is required (output of "
-            "`python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"`). "
-            "Set it in .env"
-        )
-    try:
+    if raw:
+        try:
+            return _fernet_from_raw_key(raw)
+        except Exception as exc:
+            raise RuntimeError("SETTINGS_SECRET_KEY is not a valid Fernet key.") from exc
+
+    key_path = key_dir / LOCAL_SETTINGS_KEY_FILENAME
+    if key_path.exists():
+        raw = key_path.read_text(encoding="utf-8").strip()
+        if raw:
+            try:
+                return _fernet_from_raw_key(raw)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Local settings encryption key file {key_path} is not a valid Fernet key."
+                ) from exc
+
+    if create:
         from cryptography.fernet import Fernet
 
-        return Fernet(raw.encode("utf-8"))
-    except Exception as exc:
-        raise RuntimeError("SETTINGS_SECRET_KEY is not a valid Fernet key.") from exc
+        new_key = Fernet.generate_key().decode("utf-8")
+        try:
+            key_path.write_text(new_key, encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(
+                "Could not write a local encryption key next to settings.json (folder not writable). "
+                "Set SETTINGS_SECRET_KEY in .env to a Fernet key, or run from a writable install directory."
+            ) from exc
+        return Fernet(new_key.encode("utf-8"))
+
+    return None
 
 
 def _reject_plaintext_secret(key_path: str, value: Any) -> None:
@@ -125,8 +154,7 @@ def encrypt_settings_value(value: Any, fernet: Any | None) -> Any:
         return value
     if fernet is None:
         raise RuntimeError(
-            "SETTINGS_SECRET_KEY is required to save API keys or the Discord token. "
-            "Set it in .env"
+            "SETTINGS_SECRET_KEY or a writable local key file is required to save API keys or the Discord token."
         )
     token = fernet.encrypt(s.encode("utf-8")).decode("utf-8")
     return f"{ENC_PREFIX}{token}"
@@ -152,12 +180,20 @@ def decrypt_sensitive_blocks(settings: dict[str, Any], fernet: Any | None) -> No
             discord[key] = decrypt_settings_value(discord.get(key), fernet)
 
 
-def encrypt_sensitive_blocks(settings: dict[str, Any], fernet: Any | None) -> None:
+def encrypt_sensitive_blocks(
+    settings: dict[str, Any],
+    fernet: Any | None,
+    *,
+    secrets_key_dir: Path | None = None,
+) -> None:
     """Encrypt secret fields in-place before writing JSON."""
     if fernet is None and not settings_save_requires_fernet_key(settings):
         return
     if fernet is None:
-        fernet = require_settings_fernet()
+        from ..runtime_dirs import app_bundle_dir
+
+        key_dir = secrets_key_dir if secrets_key_dir is not None else app_bundle_dir()
+        fernet = resolve_settings_fernet(key_dir, create=True)
     api = settings.get("api")
     if isinstance(api, dict):
         for key in API_SECRET_KEYS:

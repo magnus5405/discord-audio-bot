@@ -70,6 +70,7 @@ service_accounts/
 
 # App settings
 settings.json
+.discord_audio_bot_settings_key
 
 # OS
 .DS_Store
