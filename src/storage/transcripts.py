@@ -73,6 +73,12 @@ class TranscriptSessionWriter:
         self.usage["total_tokens"] = int(total)
         self.write_snapshot()
 
+    def add_tts_seconds(self, delta: float) -> None:
+        """Add generated TTS playback duration (seconds) to session usage."""
+        current = float(self.usage.get("tts_seconds_generated", 0.0) or 0.0)
+        self.usage["tts_seconds_generated"] = current + float(delta)
+        self.write_snapshot()
+
     def add_token_usage(self, delta: int) -> None:
         """Increment cumulative GenAI token counter by ``delta``."""
         current = int(self.usage.get("total_tokens", 0) or 0)

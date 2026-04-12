@@ -93,8 +93,9 @@ You'll need credentials for four integrations:
 
 #### ElevenLabs API Key
 1. Sign up at [ElevenLabs](https://elevenlabs.io/)
-2. Go to Account → API Key
-3. Copy your API key
+2. Go to **Profile → API Keys** ([direct link](https://elevenlabs.io/app/settings/api-keys)) and create or copy a key
+3. Put it in `.env` as `ELEVENLABS_API_KEY` (no quotes; avoid leading/trailing spaces). The alternate name `ELEVEN_API_KEY` is also read if the primary variable is unset.
+4. If TTS fails with **401 Unauthorized**, the key is missing, revoked, or mistyped—regenerate it and update `.env`.
 
 ### 3. Configure Environment Variables
 
@@ -166,7 +167,7 @@ Note: ElevenLabs voice IDs are available in your account. See [supported voices]
 
 ## Running
 
-### Phase 1, Phase 2, Phase 3, and Phase 4 Headless Runner
+### Phase 1–5 Headless Runner
 
 ```bash
 python -m src.main --list-voice-channels
@@ -183,7 +184,7 @@ The current headless runner is focused on validating the early voice pipeline be
 3. Join a selected voice channel and play a local MP3/WAV clip once
 4. Run a phase-two receive smoke flow that listens, pauses for playback, resumes with a fresh sink, and logs per-user frame summaries
 5. Run a phase-three transcription flow that listens in PCM mode, streams per-user STT, logs final transcript lines, and snapshots session JSON in `transcripts/`
-6. Run a phase-four **conversation** flow (`--converse`): same STT pipeline as phase three, plus Google GenAI replies (logged to the console and written under `bot_replies` / `usage` in the session JSON). Spoken ElevenLabs playback is phase five, not wired here yet.
+6. Run a **conversation** flow (`--converse`): same STT pipeline as phase three, plus Google GenAI replies (logged to the console and written under `bot_replies` / `usage` in the session JSON). Requires `ELEVENLABS_API_KEY`; each reply is synthesized with ElevenLabs (streaming HTTP, buffered to MP3) and played into the voice channel via `VoicePlaybackManager`, with `usage.tts_seconds_generated` updated from the decoded audio duration.
 7. Disconnect cleanly when playback, the smoke flow, transcription mode, or conversation mode completes
 
 If you prefer env fallbacks instead of repeating flags, set `DISCORD_VOICE_CHANNEL_ID` and `BOT_TEST_AUDIO_PATH`, then run:
@@ -217,13 +218,13 @@ The Textual TUI scaffold remains in the repository, but it is still phase-six wo
 - Each final transcript segment is appended to the in-memory conversation log and rewritten into a session file in `transcripts/`.
 - Gemini replies in `--converse` mode use the same primary locale as `stt.language_code` (system instruction + prompt nudge). Set `BOT_REPLY_LANGUAGE` or `BOT_LANGUAGE` in `.env` only if you need to override that tag.
 
-### Phase 4 Workflow
+### Phase 4 and Phase 5 Workflow (`--converse`)
 
-- Run `python -m src.main --channel-id <voice_channel_id> --converse` for open-ended STT plus GenAI replies (Ctrl+C to stop), or add `--listen-window-seconds <seconds>` for a bounded session.
-- Requires `GOOGLE_GEMINI_API_KEY` and at least one persona in `settings.json` (the `ui.last_persona_id` entry selects the default when present).
-- Reply timing follows `.env`: `BOT_REPLY_SILENCE_SECONDS`, `BOT_REPLY_COOLDOWN_SECONDS`, `BOT_MENTION_WINDOW_SECONDS`, and optional `BOT_GREET_ON_JOIN` for the join greeting.
+- Run `python -m src.main --channel-id <voice_channel_id> --converse` for open-ended STT plus GenAI replies and ElevenLabs TTS playback (Ctrl+C to stop), or add `--listen-window-seconds <seconds>` for a bounded session.
+- Requires `GOOGLE_GEMINI_API_KEY`, `ELEVENLABS_API_KEY`, and at least one persona in `settings.json` (the `ui.last_persona_id` entry selects the default when present). Persona `elevenlabs_voice_id` selects the voice; optional `ELEVENLABS_MODEL_ID` overrides the default TTS model.
+- Reply timing follows `.env`: `BOT_REPLY_SILENCE_SECONDS`, `BOT_REPLY_COOLDOWN_SECONDS`, `BOT_MENTION_WINDOW_SECONDS`, and optional `BOT_GREET_ON_JOIN` for the join greeting (spoken when TTS is enabled).
 - Reply **language** follows `stt.language_code` in `settings.json` unless `BOT_REPLY_LANGUAGE` or `BOT_LANGUAGE` is set in `.env`.
-- Replies are logged and stored as text in the session JSON; ElevenLabs voice playback is phase five.
+- Replies are logged as text under `bot_replies` in the session JSON; synthesized audio is played into the channel while receive is paused, and `usage.tts_seconds_generated` records cumulative played duration.
 
 ## Development & Architecture
 
