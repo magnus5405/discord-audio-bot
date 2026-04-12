@@ -13,7 +13,7 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
   - Mention mode: wait for silence after the bot name is mentioned, within a configurable window
   - Join greeting: optional spoken greeting when the bot joins or others enter mid-session
 - **[Textual](https://textual.textualize.io/)**: No Discord slash commands—control runs from the terminal
-- **Personas**: System instructions, Gemini model, and ElevenLabs voice per persona
+- **Characters**: System instructions, Gemini model, and ElevenLabs voice per character
 - **Session logging**: JSON transcripts and usage counters per session
 
 ## Installation
