@@ -1,0 +1,19 @@
+name: Integration
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: ./.github/workflows/job-lint.yml
+
+  typecheck:
+    uses: ./.github/workflows/job-typecheck.yml
+
+  test:
+    uses: ./.github/workflows/job-test.yml
