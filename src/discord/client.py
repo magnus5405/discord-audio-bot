@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 from contextlib import suppress
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, cast
 
 from discord.errors import DiscordServerError
 from discord.ext.voice_recv import AudioSink, VoiceRecvClient
 
 import discord
+from discord import app_commands
 
+from ..storage.consent import ConsentStore
+from .consent_commands import register_consent_commands
 from .voice_recv_patch import apply_discord_ext_voice_recv_patches
 
 logger = logging.getLogger(__name__)
@@ -46,6 +50,19 @@ def _transient_gateway_failure(exc: BaseException | None) -> bool:
         return False
 
 
+def _app_command_sync_guild_id_from_env() -> int | None:
+    """Optional guild id from env for fast `tree.sync` (DISCORD_SERVER_ID or DISCORD_GUILD_ID)."""
+    for key in ("DISCORD_SERVER_ID", "DISCORD_GUILD_ID"):
+        raw = os.getenv(key, "").strip()
+        if not raw:
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("Invalid integer for %s; skipping guild command sync.", key)
+    return None
+
+
 class DiscordClient:
     """
     Manage Discord gateway, voice connection, and receive lifecycle.
@@ -58,10 +75,14 @@ class DiscordClient:
         self,
         token: str,
         client_factory: ClientFactory = discord.Client,
+        consent_store: ConsentStore | None = None,
+        app_command_sync_guild_id: int | None = None,
     ) -> None:
         """Initialize the Discord gateway wrapper."""
         self.token = token
         self._client_factory = client_factory
+        self.consent_store = consent_store or ConsentStore()
+        self._app_command_sync_guild_id = app_command_sync_guild_id
         self.client: Optional[discord.Client] = None
         self.voice_client: Optional[VoiceRecvClient] = None
         self._ready_event = asyncio.Event()
@@ -70,19 +91,119 @@ class DiscordClient:
         self._receive_shutdown_error: Optional[Exception] = None
         self._voice_join_channel_id: Optional[int] = None
         self._voice_member_joined_handler: Optional[Callable[[discord.Member], Awaitable[None]]] = None
+        self._command_tree: Optional[app_commands.CommandTree] = None
+        self._synced_app_commands_for_client: Optional[int] = None
+        self._activity_log_sink: Callable[[str], None] | None = None
+        self.last_app_command_sync_summary: str = ""
         apply_discord_ext_voice_recv_patches()
         logger.info("DiscordClient initialized")
+
+    def set_activity_log_sink(self, sink: Callable[[str], None] | None) -> None:
+        """Optional callback for slash-command / consent events (e.g. Textual activity log)."""
+        self._activity_log_sink = sink
+
+    def _emit_activity(self, message: str) -> None:
+        line = (message or "").strip()
+        if not line:
+            return
+        logger.info("[activity] %s", line)
+        sink = self._activity_log_sink
+        if sink is not None:
+            try:
+                sink(line)
+            except Exception:
+                logger.exception("activity log sink failed")
+
+    def _pick_command_sync_guild(self, gateway: discord.Client) -> int | None:
+        """Prefer explicit id, then env, then the sole guild if the bot only belongs to one server."""
+        if self._app_command_sync_guild_id is not None:
+            return self._app_command_sync_guild_id
+        env_gid = _app_command_sync_guild_id_from_env()
+        if env_gid is not None:
+            return env_gid
+        guilds = list(getattr(gateway, "guilds", []) or [])
+        if len(guilds) == 1:
+            return cast(int, guilds[0].id)
+        return None
 
     def _create_gateway_client(self) -> discord.Client:
         intents = discord.Intents.none()
         intents.guilds = True
         intents.voice_states = True
         client = self._client_factory(intents=intents)
+        # Test doubles may omit ``http``; :class:`app_commands.CommandTree` requires a real client.
+        if getattr(client, "http", None) is not None:
+            tree = app_commands.CommandTree(client)
+            register_consent_commands(
+                tree,
+                self.consent_store,
+                activity_sink=self._emit_activity,
+            )
+            self._command_tree = tree
+        else:
+            self._command_tree = None
 
         @client.event
         async def on_ready() -> None:
             logger.info("Discord gateway ready as %s", client.user)
             self._ready_event.set()
+            if self._command_tree is not None and self._synced_app_commands_for_client != id(client):
+                self.last_app_command_sync_summary = ""
+                guild_for_sync = self._pick_command_sync_guild(client)
+                try:
+                    if guild_for_sync is not None:
+                        if client.get_guild(guild_for_sync) is None:
+                            logger.warning(
+                                "Slash sync guild id %s is not in this bot's guild cache yet (or bot left that server). "
+                                "If commands are missing, check DISCORD_SERVER_ID / settings server_id matches the server "
+                                "where the bot is installed.",
+                                guild_for_sync,
+                            )
+                        # add_command() without guild= registers globals only; sync(guild=) uploads _guild_commands
+                        # only. copy_global_to fills that mapping so the bulk upsert is not empty (discord.py pattern).
+                        self._command_tree.copy_global_to(guild=discord.Object(id=guild_for_sync))
+                        synced = await self._command_tree.sync(guild=discord.Object(id=guild_for_sync))
+                        self._synced_app_commands_for_client = id(client)
+                        names = [getattr(cmd, "name", "?") for cmd in (synced or [])]
+                        logger.info(
+                            "Synced %d application command(s) to guild %s: %s",
+                            len(synced or []),
+                            guild_for_sync,
+                            names,
+                        )
+                        if not synced:
+                            logger.warning(
+                                "Guild command sync returned no commands for guild %s — check registration and permissions.",
+                                guild_for_sync,
+                            )
+                        self.last_app_command_sync_summary = (
+                            f"Slash commands registered for guild {guild_for_sync} ({len(synced or [])} top-level). "
+                            "In Discord open the / menu and choose this bot's commands "
+                            "(re-invite with applications.commands if they are missing). "
+                            "Plain chat text like /consent does not run commands."
+                        )
+                    else:
+                        synced = await self._command_tree.sync()
+                        self._synced_app_commands_for_client = id(client)
+                        names = [getattr(cmd, "name", "?") for cmd in (synced or [])]
+                        logger.info(
+                            "Synced %d application command(s) globally: %s",
+                            len(synced or []),
+                            names,
+                        )
+                        self.last_app_command_sync_summary = (
+                            "Slash commands registered globally — they can take up to ~1 hour to appear. "
+                            "Set server_id in Settings or DISCORD_SERVER_ID in .env (or use a bot in only one server) "
+                            "for instant registration. Use Discord's / menu, not normal chat text."
+                        )
+                except Exception as exc:
+                    self._synced_app_commands_for_client = None
+                    logger.exception("Application command sync failed")
+                    self.last_app_command_sync_summary = (
+                        f"Slash command sync failed: {exc}. See logs. "
+                        "Ensure the bot token is valid, the bot is in that server, and the invite includes "
+                        "applications.commands."
+                    )
 
         @client.event
         async def on_voice_state_update(
