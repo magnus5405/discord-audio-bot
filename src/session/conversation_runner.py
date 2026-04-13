@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,7 @@ from ..discord import DiscordAudioSink, DiscordClient, VoicePlaybackManager
 from ..models import AudioFrame, Persona, TranscriptSegment
 from ..runtime_ffmpeg import probe_audio_duration_seconds
 from ..storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
+from ..storage.transcripts import attach_active_transcript_writer, detach_active_transcript_writer
 from ..transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
 from ..tts import ElevenLabsTTSClient
 from .metrics import SessionMetrics
@@ -123,6 +125,7 @@ async def run_voice_conversation(
     persona_id: str | None = None,
     external_stop_event: asyncio.Event | None = None,
     metrics: SessionMetrics | None = None,
+    user_audio_allowed: Callable[[int], bool] | None = None,
 ) -> None:
     """Run STT plus GenAI replies with ElevenLabs TTS and Discord voice playback."""
     if metrics is not None:
@@ -278,6 +281,7 @@ async def run_voice_conversation(
     supervisor_stop = {"go": True}
 
     try:
+        attach_active_transcript_writer(transcript_writer)
         discord_client.set_voice_join_handler(None, None)
         chat_session_ready = False
         if runner_config.greet_on_join and channel is not None:
@@ -310,6 +314,7 @@ async def run_voice_conversation(
             audio_queue=audio_queue,
             loop=asyncio.get_running_loop(),
             use_opus=False,
+            user_audio_allowed=user_audio_allowed,
         )
         runtime_task = asyncio.create_task(
             _wait_session_runtime(listen_window_seconds, external_stop_event),
@@ -365,6 +370,7 @@ async def run_voice_conversation(
                                 audio_queue=audio_queue,
                                 loop=asyncio.get_running_loop(),
                                 use_opus=False,
+                                user_audio_allowed=user_audio_allowed,
                             )
                             await discord_client.start_listening(resume_sink)
 
@@ -405,6 +411,7 @@ async def run_voice_conversation(
                             audio_queue=audio_queue,
                             loop=asyncio.get_running_loop(),
                             use_opus=False,
+                            user_audio_allowed=user_audio_allowed,
                         )
                         await discord_client.start_listening(resume_sink)
 
@@ -439,31 +446,34 @@ async def run_voice_conversation(
             metrics.status_line = "error"
         raise
     finally:
-        discord_client.set_voice_join_handler(None, None)
-        supervisor_stop["go"] = False
-        if supervisor_task is not None:
-            supervisor_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await supervisor_task
+        try:
+            discord_client.set_voice_join_handler(None, None)
+            supervisor_stop["go"] = False
+            if supervisor_task is not None:
+                supervisor_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await supervisor_task
 
-        if runtime_task is not None:
-            runtime_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await runtime_task
+            if runtime_task is not None:
+                runtime_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await runtime_task
 
-        if discord_client.is_listening():
-            await discord_client.stop_listening()
+            if discord_client.is_listening():
+                await discord_client.stop_listening()
 
-        consumer_stop_event.set()
-        await consumer_task
-        logger.info("Conversation mode stopped. Snapshot saved to %s", transcript_writer.path)
+            consumer_stop_event.set()
+            await consumer_task
+            logger.info("Conversation mode stopped. Snapshot saved to %s", transcript_writer.path)
 
-        inp, out = chat_manager.get_token_usage_breakdown()
-        transcript_writer.set_genai_token_counts(inp, out)
-        if metrics is not None:
-            metrics.genai_input_tokens = inp
-            metrics.genai_output_tokens = out
-            metrics.total_tokens = inp + out
-            metrics.running = False
-            if metrics.status_line != "error":
-                metrics.status_line = "stopped"
+            inp, out = chat_manager.get_token_usage_breakdown()
+            transcript_writer.set_genai_token_counts(inp, out)
+            if metrics is not None:
+                metrics.genai_input_tokens = inp
+                metrics.genai_output_tokens = out
+                metrics.total_tokens = inp + out
+                metrics.running = False
+                if metrics.status_line != "error":
+                    metrics.status_line = "stopped"
+        finally:
+            detach_active_transcript_writer(transcript_writer)
