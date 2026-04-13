@@ -8,12 +8,29 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 from ..models import TranscriptSegment
 from ..runtime_dirs import app_bundle_dir
+
+
+def _coerce_user_id_value(raw: object) -> int | None:
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+@dataclass(frozen=True, slots=True)
+class TranscriptScrubStats:
+    """Result of removing one user's segments from on-disk session transcripts."""
+
+    files_touched: int
+    segments_removed: int
 
 
 def _sanitize_filename_fragment(value: str) -> str:
@@ -123,6 +140,17 @@ class TranscriptSessionWriter:
         self.usage["total_tokens"] = inp + self.usage["genai_output_tokens"]
         self.write_snapshot()
 
+    def remove_segments_for_user(self, user_id: int) -> int:
+        """Drop all segments for ``user_id`` and persist (used by /data delete during an active session)."""
+        with self._write_lock:
+            new_segments = [s for s in self.segments if s.user_id != user_id]
+            removed = len(self.segments) - len(new_segments)
+            if removed == 0:
+                return 0
+            self.segments = new_segments
+        self.write_snapshot()
+        return removed
+
     def write_snapshot(self) -> None:
         """Rewrite the session file atomically so partial progress survives crashes."""
         payload = {
@@ -169,3 +197,86 @@ class TranscriptSessionWriter:
                 delay = min(delay * 2.0, 0.25)
         assert last_error is not None
         raise last_error
+
+
+_active_transcript_writer: TranscriptSessionWriter | None = None
+_active_transcript_writer_lock = threading.Lock()
+
+
+def attach_active_transcript_writer(writer: TranscriptSessionWriter | None) -> None:
+    """Register the session writer so /data delete can purge in-memory segments (single active session)."""
+    global _active_transcript_writer
+    with _active_transcript_writer_lock:
+        _active_transcript_writer = writer
+
+
+def detach_active_transcript_writer(writer: TranscriptSessionWriter) -> None:
+    """Clear registration if this writer is still the active one."""
+    global _active_transcript_writer
+    with _active_transcript_writer_lock:
+        if _active_transcript_writer is writer:
+            _active_transcript_writer = None
+
+
+def _purge_active_transcript_writer(user_id: int) -> TranscriptScrubStats:
+    """Remove segments for ``user_id`` from the live session file if a voice session is running."""
+    with _active_transcript_writer_lock:
+        writer = _active_transcript_writer
+    if writer is None:
+        return TranscriptScrubStats(0, 0)
+    removed = writer.remove_segments_for_user(user_id)
+    return TranscriptScrubStats(1 if removed > 0 else 0, removed)
+
+
+def scrub_user_data_from_transcripts(transcripts_dir: Path, user_id: int) -> TranscriptScrubStats:
+    """
+    Remove all ``segments`` entries matching ``user_id`` from ``*.json`` session files.
+
+    Also purges the in-memory session if one is active, so the next snapshot does not restore
+    deleted rows. Does not remove ``bot_replies`` text; only structured segments.
+    """
+    active = _purge_active_transcript_writer(user_id)
+    if not transcripts_dir.is_dir():
+        return active
+    files_touched = active.files_touched
+    segments_removed = active.segments_removed
+    for path in sorted(transcripts_dir.glob("*.json")):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        segs = data.get("segments")
+        if not isinstance(segs, list):
+            continue
+        new_segs: list[object] = []
+        removed_here = 0
+        for item in segs:
+            if not isinstance(item, dict):
+                new_segs.append(item)
+                continue
+            uid = _coerce_user_id_value(item.get("user_id"))
+            if uid is None:
+                new_segs.append(item)
+                continue
+            if uid == user_id:
+                removed_here += 1
+            else:
+                new_segs.append(item)
+        if removed_here == 0:
+            continue
+        segments_removed += removed_here
+        files_touched += 1
+        data["segments"] = new_segs
+        serialized = json.dumps(data, indent=2)
+        temp_path = path.parent / f"{path.stem}.{uuid.uuid4().hex}.tmp"
+        temp_path.write_text(serialized, encoding="utf-8")
+        try:
+            TranscriptSessionWriter._replace_with_retries(temp_path, path)
+        except PermissionError:
+            path.write_text(serialized, encoding="utf-8")
+        finally:
+            temp_path.unlink(missing_ok=True)
+    return TranscriptScrubStats(files_touched, segments_removed)
