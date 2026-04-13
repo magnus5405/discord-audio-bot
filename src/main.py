@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import logging
 import os
 import sys
 from argparse import Namespace
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Sequence
@@ -24,10 +26,32 @@ from src.runtime_dirs import app_bundle_dir, load_application_dotenv
 from src.session import ConversationRunnerConfig, run_voice_conversation
 from src.storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
 from src.storage.reply_locale import resolve_bot_reply_language_code
+from src.storage.transcripts import attach_active_transcript_writer, detach_active_transcript_writer
 from src.transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
 from src.tts import resolve_elevenlabs_api_key
 
 logger = logging.getLogger(__name__)
+
+
+def voice_user_audio_allowed(discord_client: DiscordClient) -> Callable[[int], bool]:
+    """Return a sink predicate: only consented users (and never the bot) send audio to STT."""
+    inner = getattr(discord_client, "client", None)
+    bot_user = getattr(inner, "user", None) if inner is not None else None
+    bot_id = getattr(bot_user, "id", None) if bot_user is not None else None
+    store = getattr(discord_client, "consent_store", None)
+    if store is None:
+
+        def allow_all(_user_id: int) -> bool:
+            return True
+
+        return allow_all
+
+    def allowed(user_id: int) -> bool:
+        if bot_id is not None and user_id == bot_id:
+            return True
+        return store.is_consented(user_id)
+
+    return allowed
 
 
 def configure_logging() -> None:
@@ -347,6 +371,7 @@ async def run_transcription_mode(
     listen_window_seconds: float | None,
     *,
     settings_store: SettingsStore | None = None,
+    user_audio_allowed: Callable[[int], bool] | None = None,
 ) -> None:
     """Run transcription until interrupted or the optional time window elapses."""
     settings_store = settings_store or SettingsStore()
@@ -393,6 +418,7 @@ async def run_transcription_mode(
         audio_queue=audio_queue,
         loop=asyncio.get_running_loop(),
         use_opus=False,
+        user_audio_allowed=user_audio_allowed,
     )
     runtime_task = asyncio.create_task(
         asyncio.sleep(listen_window_seconds)
@@ -413,6 +439,7 @@ async def run_transcription_mode(
     )
 
     try:
+        attach_active_transcript_writer(transcript_writer)
         await discord_client.start_listening(sink)
         done, _ = await asyncio.wait(
             {consumer_task, runtime_task},
@@ -423,16 +450,19 @@ async def run_transcription_mode(
         else:
             await runtime_task
     finally:
-        runtime_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await runtime_task
+        try:
+            runtime_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await runtime_task
 
-        if discord_client.is_listening():
-            await discord_client.stop_listening()
+            if discord_client.is_listening():
+                await discord_client.stop_listening()
 
-        consumer_stop_event.set()
-        await consumer_task
-        logger.info("Transcription stopped. Snapshot saved to %s", transcript_writer.path)
+            consumer_stop_event.set()
+            await consumer_task
+            logger.info("Transcription stopped. Snapshot saved to %s", transcript_writer.path)
+        finally:
+            detach_active_transcript_writer(transcript_writer)
 
 
 async def run_async(args: Namespace) -> None:
@@ -440,7 +470,15 @@ async def run_async(args: Namespace) -> None:
     configure_logging()
     settings_store = SettingsStore()
     token = get_required_token(settings_store)
-    discord_client = DiscordClient(token)
+    resolve_guild = getattr(settings_store, "resolve_discord_int", None)
+    sync_guild = (
+        resolve_guild("server_id", "DISCORD_SERVER_ID") if callable(resolve_guild) else None
+    )
+    dc_params = inspect.signature(DiscordClient.__init__).parameters
+    dc_kwargs: dict[str, object] = {}
+    if "app_command_sync_guild_id" in dc_params:
+        dc_kwargs["app_command_sync_guild_id"] = sync_guild
+    discord_client = DiscordClient(token, **dc_kwargs)
 
     try:
         headless_modes = (args.receive_smoke, args.transcribe, args.converse)
@@ -495,6 +533,7 @@ async def run_async(args: Namespace) -> None:
                 elevenlabs_api_key=elevenlabs_key,
                 settings_store=settings_store,
                 runner_config=runner_config,
+                user_audio_allowed=voice_user_audio_allowed(discord_client),
             )
             return
 
@@ -505,6 +544,7 @@ async def run_async(args: Namespace) -> None:
                 voice_client=voice_client,
                 listen_window_seconds=listen_window_seconds,
                 settings_store=settings_store,
+                user_audio_allowed=voice_user_audio_allowed(discord_client),
             )
             return
 
