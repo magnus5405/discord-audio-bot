@@ -58,6 +58,7 @@ apikey.txt
 
 # Transcripts and session logs
 transcripts/
+consent/
 *.log
 
 # Google Cloud Service Account Credentials
