@@ -21,7 +21,7 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
   - Default: reply after a silence window (configurable), with a cooldown between replies
   - Mention mode: wait for silence after the bot name is mentioned, within a configurable window
   - Join greeting: optional spoken greeting when the bot joins or others enter mid-session
-- **[Textual](https://textual.textualize.io/)**: No Discord slash commands—control runs from the terminal
+- **[Textual](https://textual.textualize.io/)**: Session control from the terminal; **privacy**: users must run `/consent accept` on discord before their voice is transcribed or sent to third-party APIs (see slash commands `/consent`, `/data`)
 - **Characters**: System instructions, Gemini model, and ElevenLabs voice per character
 - **Session logging**: JSON transcripts and usage counters per session
 
@@ -68,9 +68,6 @@ For dashboard behavior, logging paths, and the settings editor, see [Textual das
 ## Unimplemented Features
 
 These are features that are planned or would be valuable additions to the project in the future.
-
-- **Consent / opt-in system for voice processing**  
-The bot currently works well for small private servers where everyone already knows how it is being used, but larger communities would need a clearer consent flow before voice is processed. Adding an explicit opt-in system would make it possible to inform users that their speech may be transcribed, stored as text, and sent to external APIs. This could include a consent command, per-user consent tracking, and clear notices when the bot joins a channel. Besides being useful from a privacy perspective, it would also make the project easier to deploy responsibly in public or semi-public servers.
 
 - **SDK-agnostic interface for AI conversation**  
 The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic.
@@ -121,6 +118,8 @@ You can edit `settings.json` or generate it entirely from **Settings** inside th
 **Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` with a Fernet key (44-character url-safe base64) to store API keys under `settings.api` or the Discord token under `settings.discord`. plaintext values are rejected on load.
 
 **FFmpeg:** TTS playback uses FFmpeg. **Released Windows TUI builds** include FFmpeg next to `DiscordAudioBotTUI.exe`. When **developing from a clone**, install FFmpeg on `PATH` or set **`FFMPEG_PATH`** to the `ffmpeg` / `ffmpeg.exe` binary for a custom location.
+
+**Slash commands (`/consent`, `/data`):** These are **application commands**, not normal chat messages. In Discord, type **`/`** and select this bot’s command from the menu (or tap the command suggestion). Typing `/consent accept` as plain text does nothing. The bot invite must include the **`applications.commands`** OAuth2 scope. For fastest registration in your server, set **`server_id`** in Settings (or **`DISCORD_SERVER_ID`** in `.env`) to your Discord server (guild) id, or run the bot in **only one** server so it can auto-register commands there. Otherwise global registration can take up to about an hour to appear everywhere. After connecting the TUI, check the **Activity log** for a line confirming slash command registration.
 
 ### Running
 
