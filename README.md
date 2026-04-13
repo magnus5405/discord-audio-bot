@@ -113,17 +113,6 @@ You can edit `settings.json` or generate it entirely from **Settings** inside th
 
 **FFmpeg:** TTS playback uses FFmpeg. **Released Windows TUI builds** include FFmpeg next to `DiscordAudioBotTUI.exe`. When **developing from a clone**, install FFmpeg on `PATH` or set **`FFMPEG_PATH`** to the `ffmpeg` / `ffmpeg.exe` binary for a custom location.
 
-### Release branch (`latest`)
-
-**Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
-
-The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
-
-Production Windows releases are driven off the **`latest`** branch:
-
-1. Open a pull request **into `latest`**. CI runs **lint / typecheck / tests** (same as other PRs) plus a **version check**: `pyproject.toml` `[project] version` and `src/__init__.py` `__version__` must **match** each other, and the version must be **strictly greater** than on the current `latest` tip (semver).
-2. After merge, the [**Release**](.github/workflows/cd.yml) workflow runs on **`latest`**: it builds the Windows artifacts and creates a **GitHub Release** (and git tag **`v{version}`** from `[project] version`) via the release API. Pushes of `GITHUB_TOKEN` do not chain-trigger other workflows, so this path avoids a separate tag-push job.
-
 ### Running
 
 #### Headless smoke and pipeline checks
@@ -189,6 +178,18 @@ pytest --cov=src --cov-report=html
 ```
 
 ---
+
+## Release branch (`latest`)
+
+**Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
+
+The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
+
+Production Windows releases are driven off the **`latest`** branch:
+
+1. Open a pull request **into `latest`**. CI runs **lint / typecheck / tests** (same as other PRs) plus a **version check**: `pyproject.toml` `[project] version` and `src/__init__.py` `__version__` must **match** each other, and the version must be **strictly greater** than on the current `latest` tip (semver).
+2. After merge, the [**Release**](.github/workflows/cd.yml) workflow runs on **`latest`**: it builds the Windows artifacts and creates a **GitHub Release** (and git tag **`v{version}`** from `[project] version`) via the release API. Pushes of `GITHUB_TOKEN` do not chain-trigger other workflows, so this path avoids a separate tag-push job.
+
 
 ## Architecture
 
