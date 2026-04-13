@@ -27,15 +27,6 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
 
 ---
 
-## Unimplemented features
-
-These are features that could be implemented into this project.
-
- - **SDK agnostic interface for AI conversation**: This would enable access to all providers and even locally hosting models.
- - **Local Speect-to-Text**: An option to switch to local Speech-to-Text.
-
----
-
 ## Installation
 
 ### Windows
@@ -71,6 +62,21 @@ Visit the [Wiki](https://github.com/magnus5405/discord-audio-bot/wiki) for a mor
 Launch **`DiscordAudioBotTUI.exe`**, enter required credentials and configure your character in the settings. After configuring credentials, simply choose a **server**, **voice channel**, and **persona**, then press **Start** to connect.
 
 For dashboard behavior, logging paths, and the settings editor, see [Textual dashboard](#textual-dashboard) under Development.
+
+---
+
+## Unimplemented Features
+
+These are features that are planned or would be valuable additions to the project in the future.
+
+- **SDK-agnostic interface for AI conversation**  
+The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic, Google, or self-hosted local models without changing the surrounding bot logic.
+
+- **Local Speech-to-Text**  
+The project currently depends on external speech recognition services. Adding support for local Speech-to-Text would make it possible to run the full voice pipeline on the user’s own machine or server. This would reduce API costs and lower latency in some environments. It would also open the door to supporting popular local transcription engines such as [Whisper](https://github.com/openai/whisper)-based solutions or other on-device speech recognition systems.
+
+- **Local Text-to-Speech**  
+At the moment, voice synthesis depends on an external provider. This was chosen because ElevenLabs offer fair pricing and great voice models, with support for custom voices. Supporting local Text-to-Speech would allow fully self-hosted voice output, which would be useful for privacy-sensitive setups, offline environments, and users who want to avoid external API costs. It would also make the project more flexible for experimentation with custom voices and open-source speech models.
 
 ---
 
