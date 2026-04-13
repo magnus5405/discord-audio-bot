@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -79,6 +80,7 @@ class DiscordAudioSink(AudioSink):
         *,
         use_opus: bool = True,
         decode_opus: bool = False,
+        user_audio_allowed: Callable[[int], bool] | None = None,
     ) -> None:
         """Initialize the sink with a target queue, event loop, and audio mode."""
         super().__init__()
@@ -86,6 +88,7 @@ class DiscordAudioSink(AudioSink):
         self.loop = loop
         self.use_opus = use_opus
         self.decode_opus = decode_opus
+        self._user_audio_allowed = user_audio_allowed
         self._closed = False
         self._queue_full_logged = False
         self._user_stats: dict[int, ReceivedUserStats] = {}
@@ -102,6 +105,9 @@ class DiscordAudioSink(AudioSink):
     def write(self, user: Optional[discord.User], data: VoiceData) -> None:
         """Receive one audio chunk from the extension and forward it safely."""
         if self._closed or user is None:
+            return
+
+        if self._user_audio_allowed is not None and not self._user_audio_allowed(user.id):
             return
 
         packet_bytes = data.opus if self.use_opus else data.pcm

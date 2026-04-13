@@ -12,9 +12,7 @@ You are assisting with a **Discord voice-channel conversational bot** (Python 3.
 - Streams per-user audio to **Google Cloud Speech-to-Text**
 - Runs reply logic and **Google GenAI (Gemini)** multi-turn chat
 - Synthesizes replies with **ElevenLabs** and plays them back into the channel
-- Is controlled from a **Textual** terminal UI (dashboard + settings editor), not slash commands
-
-**Do not add Discord text commands, message content handlers, or `discord.py.ext.commands` bots.** Control and configuration are TUI-driven or CLI smoke flags.
+- Is controlled from a **Textual** terminal UI (dashboard + settings editor), with **slash commands** for privacy compliance (`/consent`, `/data`)
 
 ## Module map (`src/`)
 
@@ -28,7 +26,8 @@ Use these real paths (not legacy single-file names):
 | STT pipeline | `src/transcription/coordinator.py`, `stt.py`, `stt_v1.py`, `preprocessing.py`, `vad.py` |
 | Conversation | `src/conversation/chat.py`, `policy.py`, `log.py`, `persona.py` |
 | Data models | `src/models/audio.py`, `config.py`, `transcript.py` |
-| Persistence / resolution | `src/storage/settings.py`, `transcripts.py`, `reply_locale.py` |
+| Persistence / resolution | `src/storage/settings.py`, `transcripts.py`, `consent.py`, `reply_locale.py` |
+| Compliance / slash commands | `src/discord/consent_commands.py` (registered from `src/discord/client.py`) |
 | TTS | `src/tts/elevenlabs.py` |
 | TUI | `src/ui/dashboard/`, `src/ui/settings/`, `src/ui/widgets/`, `src/ui/main.py` |
 
@@ -75,6 +74,11 @@ Prefer dataclasses and explicit types for frames and transcript segments (see `s
 - **ElevenLabs**: streaming HTTP; voice id per persona in `settings.json`.
 - **Textual**: reactive state and workers for long tasks; keep UI updates on the Textual loop.
 
+## Discord interaction style
+
+- Prefer **TUI and CLI** for session control. **Do not** add general-purpose message-prefix commands or `discord.ext.commands` bots.
+- **Exception**: **Compliance slash commands** (`discord.app_commands`) for consent and data deletion are required (see issue #8). Register them on the shared `CommandTree` in `src/discord/client.py`.
+
 ## Testing and manual validation
 
 - **pytest** and **pytest-asyncio** for unit and async tests under `tests/`.
@@ -91,12 +95,10 @@ Session JSON under `transcripts/` helps debug STT and conversation output.
 
 ## Pitfalls to avoid
 
-1. Slash commands or message-based control surfaces
-2. Reading text channels for bot control
-3. Automatic retry loops that hide API or voice misconfiguration
-4. Blocking the Discord event loop
-5. Heavy work inside voice sink `write` paths
+1. Automatic retry loops that hide API or voice misconfiguration
+2. Blocking the Discord event loop
+3. Heavy work inside voice sink `write` paths
 
 ## Authoritative docs
 
-Use [README.md](../README.md) and [QUICKSTART.md](../QUICKSTART.md) plus the source tree above. When a suggestion conflicts with implemented resolution order or voice lifecycle, **prefer the code in `src/storage/settings.py` and `src/discord/`**.
+Use [README.md](../README.md) plus the source tree above. When a suggestion conflicts with implemented resolution order or voice lifecycle, **prefer the code in `src/storage/settings.py` and `src/discord/`**.

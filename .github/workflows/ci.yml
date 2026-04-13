@@ -9,21 +9,21 @@ on:
     paths-ignore:
       - '**/*.md'
 
-# Same commit often triggers both push (e.g. to main) and pull_request (e.g. main → latest).
-# Key by PR head SHA when applicable, else the pushed commit, so overlapping runs cancel.
-concurrency:
-  group: integration-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
+# Pushing to `main` and syncing a same-repo PR whose head is `main` (e.g. main → latest) would
+# run this workflow twice for one commit. Skip the redundant pull_request run; fork PRs still run
+# because head.repo differs from github.repository.
 jobs:
   lint:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.head_ref != 'main'
     uses: ./.github/workflows/job-lint.yml
 
   typecheck:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.head_ref != 'main'
     uses: ./.github/workflows/job-typecheck.yml
 
   test:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.head_ref != 'main'
     uses: ./.github/workflows/job-test.yml

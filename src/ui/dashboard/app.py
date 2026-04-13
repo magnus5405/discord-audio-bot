@@ -22,6 +22,7 @@ from src.main import (
     resolve_reply_cooldown_seconds,
     resolve_reply_silence_seconds,
     resolve_stt_idle_timeout_seconds,
+    voice_user_audio_allowed,
 )
 from src.session import ConversationRunnerConfig, SessionMetrics, run_voice_conversation
 from src.storage import SettingsStore
@@ -133,6 +134,14 @@ class BotDashboardApp(App[None]):
         timestamp = time.strftime("%H:%M:%S")
         self.query_one("#event_log", Log).write_line(f"[{timestamp}] {message}")
 
+    def _append_activity_line(self, message: str) -> None:
+        """Append a line to the activity log without status de-duplication."""
+        line = (message or "").strip()
+        if not line:
+            return
+        timestamp = time.strftime("%H:%M:%S")
+        self.query_one("#event_log", Log).write_line(f"[{timestamp}] {line}")
+
     def _sync_transcript_log(self) -> None:
         if not self._session_live():
             return
@@ -219,14 +228,34 @@ class BotDashboardApp(App[None]):
             return int(last_guild_id)
         return self._settings_store.resolve_discord_int("server_id", "DISCORD_SERVER_ID")
 
+    def _slash_command_registry_guild_id(self) -> int | None:
+        """Guild id for `tree.sync`: prefer settings / env over last UI selection (avoids wrong-server sync)."""
+        try:
+            configured = self._settings_store.resolve_discord_int("server_id", "DISCORD_SERVER_ID")
+        except ValueError:
+            logger.warning("Invalid server_id or DISCORD_SERVER_ID; using last selected server for slash sync if any.")
+            configured = None
+        if configured is not None:
+            return configured
+        prefs = self._settings_store.get_ui_preferences()
+        last_guild_id = prefs.get("last_guild_id")
+        if last_guild_id is not None:
+            return int(last_guild_id)
+        return None
+
     async def _connect_discord_body(self) -> None:
         self._set_status("Connecting to Discord...")
         self.call_later(self._sync_start_button_state)
         try:
             token = get_required_token(self._settings_store)
-            self._discord = DiscordClient(token)
+            sync_guild = self._slash_command_registry_guild_id()
+            self._discord = DiscordClient(token, app_command_sync_guild_id=sync_guild)
+            self._discord.set_activity_log_sink(lambda msg: self.call_later(self._append_activity_line, msg))
             await self._discord.connect()
             await self._populate_guild_table()
+            summary = (self._discord.last_app_command_sync_summary or "").strip()
+            if summary:
+                self.call_later(self._append_activity_line, summary)
             self._set_status("Connected. Highlight a server to load voice channels.")
         except Exception as exc:
             logger.exception("Discord connect failed")
@@ -513,6 +542,7 @@ class BotDashboardApp(App[None]):
                 persona_id=persona_id,
                 external_stop_event=self._stop_event,
                 metrics=self._metrics,
+                user_audio_allowed=voice_user_audio_allowed(self._discord),
             )
         except asyncio.CancelledError:
             raise

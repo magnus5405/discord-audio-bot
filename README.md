@@ -1,6 +1,15 @@
 # Discord Audio Bot
 
+<img width="1068" height="299" alt="image" src="https://github.com/user-attachments/assets/c684ef20-9767-476b-a742-b38ad745823c" />
+
+---
+
+<img width="1069" height="643" alt="image" src="https://github.com/user-attachments/assets/8ae49b3c-69aa-4ada-b594-f3361e9a0327" />
+
+
 A Discord voice-channel conversational bot with a [Textual TUI](https://textual.textualize.io/). The bot joins voice channels, listens to speakers, transcribes speech in real time, maintains multi-turn conversations using [Google GenAI](https://github.com/googleapis/python-genai), and replies with synthesized speech via [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python).
+
+---
 
 ## Features
 
@@ -12,13 +21,15 @@ A Discord voice-channel conversational bot with a [Textual TUI](https://textual.
   - Default: reply after a silence window (configurable), with a cooldown between replies
   - Mention mode: wait for silence after the bot name is mentioned, within a configurable window
   - Join greeting: optional spoken greeting when the bot joins or others enter mid-session
-- **[Textual](https://textual.textualize.io/)**: No Discord slash commands—control runs from the terminal
+- **[Textual](https://textual.textualize.io/)**: Session control from the terminal; **privacy**: users must run `/consent accept` on discord before their voice is transcribed or sent to third-party APIs (see slash commands `/consent`, `/data`)
 - **Characters**: System instructions, Gemini model, and ElevenLabs voice per character
 - **Session logging**: JSON transcripts and usage counters per session
 
+---
+
 ## Installation
 
-### Windows (GitHub release)
+### Windows
 
 Tagged releases publish **Windows** artifacts on [GitHub Releases](https://github.com/Magnus5405/discord-audio-bot/releases):
 
@@ -27,23 +38,45 @@ Tagged releases publish **Windows** artifacts on [GitHub Releases](https://githu
 | **`DiscordAudioBotTUI-Setup.exe`** | Inno Setup installer — installs under Program Files, adds a Start Menu entry, and optionally a desktop shortcut. |
 | **`DiscordAudioBotTUI-windows.zip`** | Portable folder — extract anywhere and run `DiscordAudioBotTUI.exe`. |
 
-Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor (see [Configuration](#3-configuration-env-and-settingsjson) below).
+Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor.
 
-**macOS / Linux** — install and run **from source**; follow [Development](#development) (clone, venv, `pip install -e .`, FFmpeg on `PATH`).
+### MacOS / Linux
 No official releases for macOS and Linux, but contributions are welcome to implement this.
+
+Install and run **from source**; follow [Development](#development).
+
 
 ### API credentials
 
 You need accounts for **Discord**, **Google** (Gemini + Speech-to-Text), and **ElevenLabs**:
 
-- **Discord**: [Developer Portal](https://discord.com/developers/applications) — bot token; enable `GUILDS` and `GUILD_VOICE_STATES`; the bot does not use message content in servers.
-- **Gemini**: API key from [Google AI Studio](https://aistudio.google.com/) → `GOOGLE_GEMINI_API_KEY`
-- **Speech-to-Text**: Cloud API key with Speech-to-Text API enabled → `GOOGLE_STT_API_KEY` (v1 backend), or service account + project fields for v2 (see `.env.example`).
-- **ElevenLabs**: [API keys](https://elevenlabs.io/app/settings/api-keys) → `ELEVENLABS_API_KEY` (or `ELEVEN_API_KEY` as fallback).
+- **Discord**: [Developer Portal](https://discord.com/developers/applications) $\rightarrow$ `DISCORD_TOKEN`.
+- **Gemini**: API key from [Google AI Studio](https://aistudio.google.com/) $\rightarrow$ `GOOGLE_GEMINI_API_KEY`.
+- **Speech-to-Text**: [Google Cloud](https://console.cloud.google.com/) credentials for Speech-to-Text API enabled $\rightarrow$ `GOOGLE_STT_API_KEY` for v1, or service account + project fields for v2.
+- **ElevenLabs**: [API keys](https://elevenlabs.io/app/settings/api-keys) $\rightarrow$ `ELEVENLABS_API_KEY`.
+
+Visit the [Wiki](https://github.com/magnus5405/discord-audio-bot/wiki) for a more detailed description on how to aquire these credentials.
 
 ### Running
 
-Launch **`DiscordAudioBotTUI.exe`** (installed or portable). In the TUI, choose a **server**, **voice channel**, and **persona**, then press **Start** to connect. For dashboard behavior, logging paths, and the settings editor, see [Textual dashboard](#textual-dashboard) under Development.
+Launch **`DiscordAudioBotTUI.exe`**, enter required credentials and configure your character in the settings. After configuring credentials, simply choose a **server**, **voice channel**, and **persona**, then press **Start** to connect.
+
+For dashboard behavior, logging paths, and the settings editor, see [Textual dashboard](#textual-dashboard) under Development.
+
+---
+
+## Unimplemented Features
+
+These are features that are planned or would be valuable additions to the project in the future.
+
+- **SDK-agnostic interface for AI conversation**  
+The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic.
+
+- **Local Speech-to-Text**  
+The project currently depends on external speech recognition services. Adding support for local Speech-to-Text would make it possible to run the full voice pipeline on the user’s own machine or server. This would reduce API costs and lower latency in some environments. It would also open the door to supporting popular local transcription engines such as [Whisper](https://github.com/openai/whisper)-based solutions or other on-device speech recognition systems.
+
+- **Local Text-to-Speech**  
+At the moment, voice synthesis depends on an external provider. This was chosen because ElevenLabs offer fair pricing and great voice models, with support for custom voices. Supporting local Text-to-Speech would allow fully self-hosted voice output, which would be useful for privacy-sensitive setups, offline environments, and users who want to avoid external API costs. It would also make the project more flexible for experimentation with custom voices and open-source speech models.
 
 ---
 
@@ -52,17 +85,14 @@ Launch **`DiscordAudioBotTUI.exe`** (installed or portable). In the TUI, choose 
 ### Prerequisites
 
 - **[Python 3.11+](https://www.python.org/downloads/)**
-- **[FFmpeg](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip)**: required for audio encode/decode when **running from source** (install on `PATH`). **Official Windows TUI builds** (installer and portable zip) ship **ffmpeg.exe** and **ffprobe.exe** next to the executable — no separate FFmpeg install for those.
+- **[FFmpeg]()**: required for audio encode/decode when **running from source** (install on `PATH`). **Official Windows TUI builds** (installer and portable zip) ship **ffmpeg.exe** and **ffprobe.exe** next to the executable — no separate FFmpeg install for those.
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt-get install ffmpeg`
-  - Windows (dev / source only): [ffmpeg.org](https://ffmpeg.org/download.html) or `choco install ffmpeg`
-- **System Opus** (optional): can help voice performance
-  - macOS: `brew install opus`
-  - Ubuntu/Debian: `sudo apt-get install libopus0`
+  - Windows: [gyan.dev/ffmpeg](https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip) or `choco install ffmpeg`
 
 ### Setup
 
-#### 1. Clone and install
+#### Clone and install
 
 ```bash
 git clone https://github.com/Magnus5405/discord-audio-bot.git
@@ -72,16 +102,7 @@ python -m venv .venv
 pip install -e .
 ```
 
-#### 2. API credentials
-
-You need Discord, Google (Gemini + Speech-to-Text), and ElevenLabs. Step-by-step links stay the same as in earlier docs:
-
-- **Discord**: [Developer Portal](https://discord.com/developers/applications) — bot token; enable `GUILDS` and `GUILD_VOICE_STATES`; the bot does not use message content in servers.
-- **Gemini**: API key from [Google AI Studio](https://aistudio.google.com/) → `GOOGLE_GEMINI_API_KEY`
-- **Speech-to-Text**: Cloud API key with Speech-to-Text API enabled → `GOOGLE_STT_API_KEY` (v1 backend), or service account + project fields for v2 (see `.env.example`).
-- **ElevenLabs**: [API keys](https://elevenlabs.io/app/settings/api-keys) → `ELEVENLABS_API_KEY` (or `ELEVEN_API_KEY` as fallback).
-
-### 3. Configuration: `.env` and `settings.json`
+#### Configuration: `.env` and `settings.json`
 There are two layers:
 
 1. **`.env`** — secrets and machine-local defaults (loaded via `python-dotenv` on startup).
@@ -90,51 +111,15 @@ There are two layers:
 
 **Precedence**:
 
-- API secrets such as Gemini, STT, ElevenLabs, and Discord token are resolved with **values saved in `settings.json` first**, then fall back to environment variables (see `SettingsStore.resolve_api_secret` and related helpers in [`src/storage/settings.py`](src/storage/settings.py)).
-- Discord-specific overrides and runtime fields (for example reply language from the TUI) follow the same pattern: **settings file overrides `.env`** where both exist.
-- Reply **locale** for GenAI: TUI/runtime `reply_language` → `BOT_REPLY_LANGUAGE` / `BOT_LANGUAGE` in `.env` → `stt.language_code` in `settings.json` (see [`src/storage/reply_locale.py`](src/storage/reply_locale.py)).
+- API secrets such as Gemini, STT, ElevenLabs, and Discord token are resolved with **values saved in `settings.json` first**, then fall back to environment variables
 
 You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`).
 
-**Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` (Fernet key: 44-character url-safe base64) when you store API keys under `settings.api` or the Discord token under `settings.discord`. Those fields must use an `enc:v1:` prefix at rest; plaintext values are rejected on load. A template-only `settings.json` (no `api` / `discord` secrets) loads without this key. Anyone with the key and the file can decrypt — treat it like a master password. If you still have plaintext secrets in an older `settings.json`, remove those keys or re-save them from the TUI once this key is set so they are rewritten encrypted.
+**Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` with a Fernet key (44-character url-safe base64) to store API keys under `settings.api` or the Discord token under `settings.discord`. plaintext values are rejected on load.
 
 **FFmpeg:** TTS playback uses FFmpeg. **Released Windows TUI builds** include FFmpeg next to `DiscordAudioBotTUI.exe`. When **developing from a clone**, install FFmpeg on `PATH` or set **`FFMPEG_PATH`** to the `ffmpeg` / `ffmpeg.exe` binary for a custom location.
 
-**Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
-
-The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
-
-### Release branch (`latest`)
-
-Production Windows releases are driven off the **`latest`** branch:
-
-1. Open a pull request **into `latest`**. CI runs **lint / typecheck / tests** (same as other PRs) plus a **version check**: `pyproject.toml` `[project] version` and `src/__init__.py` `__version__` must **match** each other, and the version must be **strictly greater** than on the current `latest` tip (semver).
-2. After merge, the [**Release**](.github/workflows/cd.yml) workflow runs on **`latest`**: it builds the Windows artifacts and creates a **GitHub Release** (and git tag **`v{version}`** from `[project] version`) via the release API. Pushes of `GITHUB_TOKEN` do not chain-trigger other workflows, so this path avoids a separate tag-push job.
-
-In GitHub: create the **`latest`** branch if it does not exist yet, then under **Settings → Rules → Rulesets** (or branch protection), require the **`require-version-bump`** check (and your usual CI jobs) before merging into `latest`. The **`SETTINGS_SECRET_KEY`** repository secret is optional for the Windows build job; if unset, CI generates a throwaway key for the runner only (it is not embedded in the app). For local installs, set **`SETTINGS_SECRET_KEY`** in `.env` whenever you persist encrypted API keys or a Discord token in `settings.json`.
-
-#### 4. Example `settings.json`
-
-```json
-{
-  "personas": [
-    {
-      "id": "default",
-      "name": "Default Bot",
-      "system_instruction": "You are a helpful Discord bot in a voice channel conversation. Be concise (1-2 sentences), friendly, and conversational.",
-      "genai_model": "gemini-2.5-flash",
-      "elevenlabs_voice_id": "JBFqnCBsd6RMkjVDRZzb"
-    }
-  ],
-  "ui": {
-    "last_guild_id": null,
-    "last_channel_id": null,
-    "last_persona_id": "default"
-  }
-}
-```
-
-ElevenLabs voice IDs are listed in your ElevenLabs account ([voices docs](https://elevenlabs.io/docs/voices)).
+**Slash commands (`/consent`, `/data`):** These are **application commands**, not normal chat messages. In Discord, type **`/`** and select this bot’s command from the menu (or tap the command suggestion). Typing `/consent accept` as plain text does nothing. The bot invite must include the **`applications.commands`** OAuth2 scope. For fastest registration in your server, set **`server_id`** in Settings (or **`DISCORD_SERVER_ID`** in `.env`) to your Discord server (guild) id, or run the bot in **only one** server so it can auto-register commands there. Otherwise global registration can take up to about an hour to appear everywhere. After connecting the TUI, check the **Activity log** for a line confirming slash command registration.
 
 ### Running
 
@@ -200,13 +185,28 @@ pytest tests/test_models.py
 pytest --cov=src --cov-report=html
 ```
 
+---
+
+## Release branch (`latest`)
+
+**Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
+
+The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
+
+Production Windows releases are driven off the **`latest`** branch:
+
+1. Open a pull request **into `latest`**. CI runs **lint / typecheck / tests** (same as other PRs) plus a **version check**: `pyproject.toml` `[project] version` and `src/__init__.py` `__version__` must **match** each other, and the version must be **strictly greater** than on the current `latest` tip (semver).
+2. After merge, the [**Release**](.github/workflows/cd.yml) workflow runs on **`latest`**: it builds the Windows artifacts and creates a **GitHub Release** (and git tag **`v{version}`** from `[project] version`) via the release API. Pushes of `GITHUB_TOKEN` do not chain-trigger other workflows, so this path avoids a separate tag-push job.
+
+---
+
 ## Architecture
 
 End-to-end data flow:
 
 ```text
-Discord voice receive → preprocessing / optional VAD → Google STT
-  → conversation log + reply policy → Google GenAI → ElevenLabs TTS → Discord playback
+Discord voice receive $\rightarrow$ preprocessing / optional VAD $\rightarrow$ Google STT
+  $\rightarrow$ conversation log + reply policy $\rightarrow$ Google GenAI $\rightarrow$ ElevenLabs TTS $\rightarrow$ Discord playback
 ```
 
 `settings.json` and `.env` feed STT backend choice, languages, personas, API keys, and reply timing.
@@ -227,7 +227,7 @@ src/
 ├── discord/
 │   ├── client.py           # Gateway, voice join, receive lifecycle
 │   ├── playback.py         # VoiceClient playback
-│   ├── voice_sink.py       # Incoming audio sink → queues
+│   ├── voice_sink.py       # Incoming audio sink $\rightarrow$ queues
 │   ├── voice_recv_patch.py # Compatibility patches
 │   └── preflight.py        # FFmpeg / voice dependency checks
 ├── models/
@@ -255,15 +255,13 @@ src/
 
 **Concurrency**: Discord runs on asyncio; voice sink callbacks may run off the main async path—forward work to `asyncio.Queue` with `loop.call_soon_threadsafe` instead of blocking. The Textual app has its own loop; the dashboard communicates with the Discord side via the session runner and shared settings/metrics—do not call Discord APIs from sink callbacks.
 
+---
+
 ## Other considerations
 
 ### Voice encryption (DAVE)
 
 Discord expects DAVE-capable clients. Keep `discord.py`, `PyNaCl`, `davey`, and related packages current. `discord.py`’s `[voice]` extra (pulled in by `discord-ext-voice-recv`) requires **PyNaCl below 1.6**; this repo matches that range so pip can resolve.
-
-```bash
-pip install --upgrade discord.py "PyNaCl>=1.5,<1.6" davey
-```
 
 ### Transcription language
 
@@ -273,10 +271,16 @@ If `settings.json` has no `stt` block, the app defaults to `en-US` with English 
 
 Conversation state is not persisted across runs; transcript JSON under `transcripts/` is for debugging and analysis.
 
+---
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and pull request expectations. Architecture and coding guardrails are in [`.github/copilot-instructions.md`](.github/copilot-instructions.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and pull request expectations.
+
+---
 
 ## License
 
 This project is released under the MIT License; see the [`LICENSE`](LICENSE) file.
+
+---
