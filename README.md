@@ -69,6 +69,9 @@ For dashboard behavior, logging paths, and the settings editor, see [Textual das
 
 These are features that are planned or would be valuable additions to the project in the future.
 
+- **Consent / opt-in system for voice processing**  
+The bot currently works well for small private servers where everyone already knows how it is being used, but larger communities would need a clearer consent flow before voice is processed. Adding an explicit opt-in system would make it possible to inform users that their speech may be transcribed, stored as text, and sent to external APIs. This could include a consent command, per-user consent tracking, and clear notices when the bot joins a channel. Besides being useful from a privacy perspective, it would also make the project easier to deploy responsibly in public or semi-public servers.
+
 - **SDK-agnostic interface for AI conversation**  
 The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic.
 
