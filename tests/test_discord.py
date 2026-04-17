@@ -795,6 +795,7 @@ class FakeSettingsStore:
 
     def get_stt_config(self) -> dict[str, object]:
         return {
+            "provider": "google",
             "language_code": "da-DK",
             "alternative_language_codes": ["en-US"],
         }
@@ -809,11 +810,26 @@ class FakeSettingsStore:
     def resolve_stt_api_key(self) -> str | None:
         return None
 
+    def resolve_stt_provider(self) -> str:
+        return "google"
+
     def resolve_stt_project_id(self) -> str | None:
         return None
 
     def resolve_stt_speech_backend(self) -> str | None:
         return None
+
+    def resolve_stt_local_backend(self) -> str:
+        return "whispercpp"
+
+    def resolve_stt_local_model(self) -> str:
+        return "base"
+
+    def resolve_stt_local_models_dir(self) -> str | None:
+        return None
+
+    def resolve_stt_local_models_dir_path(self) -> Path:
+        return Path("stt-models")
 
     def resolve_stt_credentials_path(self) -> str | None:
         return None
@@ -828,9 +844,13 @@ class FakeSettingsStore:
 class FakeStreamingSTTClient:
     """Fake STT client that yields one final transcript per utterance."""
 
+    instances: list["FakeStreamingSTTClient"] = []
+
     def __init__(self, primary_language: str, alternative_languages: list[str], **_kwargs) -> None:
         self.primary_language = primary_language
         self.alternative_languages = alternative_languages
+        self.kwargs = _kwargs
+        self.__class__.instances.append(self)
 
     async def validate_connectivity(self) -> None:
         return None
@@ -864,6 +884,7 @@ def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -
 
     async def scenario() -> None:
         FakeTranscriptionDiscordClient.instances.clear()
+        FakeStreamingSTTClient.instances.clear()
         monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
         monkeypatch.setattr(main_module, "configure_logging", lambda: None)
         monkeypatch.setattr(main_module, "DiscordClient", FakeTranscriptionDiscordClient)
@@ -911,6 +932,63 @@ def test_run_transcribe_flow_logs_and_persists_segments(monkeypatch, tmp_path) -
             "tts_characters": 0,
             "stt_seconds_processed": 0.0,
         }
+
+    run_async(scenario())
+
+
+def test_run_transcribe_flow_supports_local_stt_without_google_credentials(monkeypatch, tmp_path) -> None:
+    """Local STT mode should start with only a downloaded model and no Google credentials."""
+
+    class LocalSettingsStore(FakeSettingsStore):
+        def get_stt_config(self) -> dict[str, object]:
+            return {
+                "provider": "local",
+                "language_code": "da-DK",
+                "alternative_language_codes": ["en-US"],
+                "local_backend": "whispercpp",
+                "local_model": "base",
+                "local_models_dir": str(tmp_path),
+            }
+
+        def resolve_stt_provider(self) -> str:
+            return "local"
+
+        def resolve_stt_local_models_dir(self) -> str | None:
+            return str(tmp_path)
+
+        def resolve_stt_local_models_dir_path(self) -> Path:
+            return tmp_path
+
+    async def scenario() -> None:
+        FakeTranscriptionDiscordClient.instances.clear()
+        FakeStreamingSTTClient.instances.clear()
+        (tmp_path / "ggml-base.bin").write_bytes(b"model")
+        monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
+        monkeypatch.setattr(main_module, "configure_logging", lambda: None)
+        monkeypatch.setattr(main_module, "DiscordClient", FakeTranscriptionDiscordClient)
+        monkeypatch.setattr(main_module, "SettingsStore", LocalSettingsStore)
+        monkeypatch.setattr(main_module, "GoogleSTTClient", FakeStreamingSTTClient)
+        monkeypatch.setattr(main_module, "validate_voice_dependencies", lambda: None)
+        monkeypatch.setenv("DISCORD_TOKEN", "token123")
+
+        await main_module.run(
+            [
+                "--channel-id",
+                "42",
+                "--transcribe",
+                "--listen-window-seconds",
+                "0.05",
+            ]
+        )
+
+        fake_client = FakeTranscriptionDiscordClient.instances[-1]
+        stt_client = FakeStreamingSTTClient.instances[-1]
+        assert fake_client.calls[0] == "connect"
+        assert stt_client.primary_language == "da-DK"
+        assert stt_client.kwargs["provider"] == "local"
+        assert stt_client.kwargs["local_backend"] == "whispercpp"
+        assert stt_client.kwargs["local_model"] == "base"
+        assert stt_client.kwargs["local_models_dir"] == str(tmp_path)
 
     run_async(scenario())
 

@@ -204,7 +204,7 @@ class TestConversationLog:
                 is_final=True,
             )
         )
-        log.add_bot_turn("reply")
+        log.add_bot_turn("reply", timestamp=2.5)
         log.add_segment(
             TranscriptSegment(
                 user_id=2,
@@ -232,7 +232,25 @@ class TestConversationLog:
             )
         )
         assert log.has_pending_since_bot() is True
-        log.add_bot_turn("bot said")
+        log.add_bot_turn("bot said", timestamp=2.5)
+        assert log.has_pending_since_bot() is False
+
+    def test_late_arriving_segment_before_bot_turn_is_not_treated_as_pending(self):
+        """Timestamp cut-off should ignore old speech that finishes transcribing after the bot replied."""
+        log = ConversationLog()
+        log.add_bot_turn("reply", timestamp=5.0)
+        log.add_segment(
+            TranscriptSegment(
+                user_id=1,
+                username="Alice",
+                text="late result",
+                start_ts=3.0,
+                end_ts=4.5,
+                is_final=True,
+            )
+        )
+
+        assert log.merge_segments() == ""
         assert log.has_pending_since_bot() is False
 
 
