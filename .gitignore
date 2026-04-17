@@ -76,3 +76,6 @@ settings.json
 # OS
 .DS_Store
 Thumbs.db
+
+# STT model files
+stt-models/
