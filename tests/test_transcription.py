@@ -21,8 +21,8 @@ from src.transcription.stt import GoogleSTTClient, GoogleSTTV1Client, GoogleSTTV
 
 @pytest.fixture(autouse=True)
 def _isolate_google_stt_from_dotenv(monkeypatch):
-    """Google STT calls load_application_dotenv; patch the bound name so repo .env cannot refill env."""
-    monkeypatch.setattr("src.runtime_dirs.load_application_dotenv", lambda: None)
+    """GoogleSTTV2Client calls load_dotenv(); repo .env must not override test env."""
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *_a, **_k: True)
 
 
 def run_async(awaitable):
@@ -551,18 +551,13 @@ def test_google_stt_factory_v2_with_ai_studio_project_raises() -> None:
 def test_google_stt_client_falls_back_to_v1_when_only_api_key_no_project(monkeypatch):
     """Without a v2 project or service account, ``GOOGLE_STT_API_KEY`` selects legacy Speech v1."""
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GOOGLE_STT_SPEECH_BACKEND", raising=False)
     monkeypatch.setenv("GOOGLE_STT_API_KEY", "key-present")
     monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
     monkeypatch.delenv("GCLOUD_PROJECT", raising=False)
 
-    class FakeV1:
-        def __init__(self, *, client_options=None):
-            self.client_options = client_options
-
-    with patch("src.transcription.stt_v1.speech_v1.SpeechAsyncClient", FakeV1):
-        stt_client = GoogleSTTClient(primary_language="da-DK")
-
+    stt_client = GoogleSTTClient(primary_language="da-DK")
     assert isinstance(stt_client, GoogleSTTV1Client)
     assert stt_client.api_key == "key-present"
 

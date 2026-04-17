@@ -38,7 +38,7 @@ Tagged releases publish **Windows** artifacts on [GitHub Releases](https://githu
 | **`DiscordAudioBotTUI-Setup.exe`** | Inno Setup installer — installs under Program Files, adds a Start Menu entry, and optionally a desktop shortcut. |
 | **`DiscordAudioBotTUI-windows.zip`** | Portable folder — extract anywhere and run `DiscordAudioBotTUI.exe`. |
 
-Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor.
+Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a read-only `settings-example.json` beside the app; the real `settings.json` is created only when you save from the **Settings** TUI editor, so upgrades in the same folder preserve your existing config.
 
 ### MacOS / Linux
 No official releases for macOS and Linux, but contributions are welcome to implement this.
@@ -108,12 +108,13 @@ There are two layers:
 1. **`.env`** — secrets and machine-local defaults (loaded via `python-dotenv` on startup).
    `.env.example` documents defaults for reply timing, STT backend, optional pricing hints, `DEBUG_MODE`, and `TUI_LOG_FILE`.
 2. **`settings.json`** in the project root — personas, STT language, UI selections, and optional persisted API keys or Discord fields when you save from the TUI settings editor.
+   When `settings.json` is missing, the app falls back to `settings-example.json` if present and creates `settings.json` on the first save.
 
 **Precedence**:
 
 - API secrets such as Gemini, STT, ElevenLabs, and Discord token are resolved with **values saved in `settings.json` first**, then fall back to environment variables
 
-You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`).
+You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`). Released Windows bundles keep `settings-example.json` as reference-only and preserve an existing `settings.json` during updates.
 
 **Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` with a Fernet key (44-character url-safe base64) to store API keys under `settings.api` or the Discord token under `settings.discord`. plaintext values are rejected on load.
 
@@ -191,7 +192,7 @@ pytest --cov=src --cov-report=html
 
 **Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
 
-The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
+The repo ships **`settings-example.json`** as a neutral template beside the executable. Windows release builds no longer pre-create `settings.json`, and same-directory upgrades preserve any existing `settings.json`.
 
 Production Windows releases are driven off the **`latest`** branch:
 

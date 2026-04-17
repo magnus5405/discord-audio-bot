@@ -14,7 +14,7 @@ Packages:
 - ui: Textual TUI applications
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __author__ = "Magnus5405"
 __license__ = "MIT"
 

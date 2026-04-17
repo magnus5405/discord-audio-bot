@@ -44,14 +44,21 @@ class GoogleSTTV1Client:
                 "Speech v1 requires GOOGLE_STT_API_KEY (a Google Cloud API key with "
                 "Cloud Speech-to-Text enabled)."
             )
-        self.client = client or speech_v1.SpeechAsyncClient(
-            client_options=ClientOptions(api_key=self.api_key),
-        )
+        self._client = client
         logger.info(
             "GoogleSTTV1Client (legacy v1): %s + %s",
             primary_language,
             self.alternative_languages,
         )
+
+    @property
+    def client(self) -> speech_v1.SpeechAsyncClient:
+        """Build the async gRPC client lazily so sync-only construction doesn't need an event loop."""
+        if self._client is None:
+            self._client = speech_v1.SpeechAsyncClient(
+                client_options=ClientOptions(api_key=self.api_key),
+            )
+        return self._client
 
     def _build_recognition_config(self, sample_rate_hz: int) -> speech_v1.RecognitionConfig:
         return speech_v1.RecognitionConfig(
