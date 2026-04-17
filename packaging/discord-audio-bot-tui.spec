@@ -1,7 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec: TUI-only console build (onedir). Run from repo root."""
 
-import shutil
 import struct
 import sys
 from pathlib import Path
@@ -23,10 +22,6 @@ from ensure_ffmpeg_windows import ensure_ffmpeg_binaries
 entry_script = project_root / "src" / "tui_frozen_main.py"
 
 _default_settings_src = project_root / "settings-example.json"
-_bundle_settings_dir = project_root / "build" / "pyinstaller-data"
-_bundle_settings_dir.mkdir(parents=True, exist_ok=True)
-_bundle_settings_path = _bundle_settings_dir / "settings.json"
-shutil.copyfile(_default_settings_src, _bundle_settings_path)
 
 hiddenimports = (
     collect_submodules("textual")
@@ -47,7 +42,7 @@ hiddenimports = (
     ]
 )
 
-datas = collect_data_files("textual") + [(str(_bundle_settings_path), ".")]
+datas = collect_data_files("textual") + [(str(_default_settings_src), ".")]
 
 _ffmpeg_bins = ensure_ffmpeg_binaries(project_root)
 
@@ -97,7 +92,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # Keep libraries + bundled ``datas`` (e.g. ``settings.json``) next to the exe so
+    # Keep libraries + bundled ``datas`` (e.g. ``settings-example.json``) next to the exe so
     # ``app_bundle_dir()`` matches where users expect ``.env`` / ``settings.json``.
     contents_directory=".",
 )
