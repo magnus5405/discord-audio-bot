@@ -15,8 +15,18 @@ def format_usd_compact(amount: float) -> str:
     return f"{sign}${body}"
 
 
-def format_stt_minutes_with_price(minutes: float, usd_per_minute: float) -> str:
+def format_stt_minutes_with_price(
+    minutes: float,
+    usd_per_minute: float,
+    *,
+    provider: str = "google",
+    average_inference_seconds: float | None = None,
+) -> str:
     """STT audio minutes and estimated STT spend."""
+    if (provider or "").strip().lower() == "local":
+        if average_inference_seconds is None:
+            return f"{minutes:.2f} min (local)"
+        return f"{minutes:.2f} min (avg {average_inference_seconds:.2f}s)"
     usd = float(minutes) * float(usd_per_minute)
     return f"{minutes:.2f} min ({format_usd_compact(usd)})"
 
