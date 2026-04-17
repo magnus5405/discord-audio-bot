@@ -26,8 +26,8 @@ from src.main import (
 )
 from src.session import ConversationRunnerConfig, SessionMetrics, run_voice_conversation
 from src.storage import SettingsStore
-from src.transcription.whispercpp import describe_whispercpp_model_status
 from src.storage.reply_locale import resolve_bot_reply_language_code
+from src.transcription.whispercpp import describe_whispercpp_model_status
 from src.tts import resolve_elevenlabs_api_key
 from src.ui.widgets import MetricTile
 

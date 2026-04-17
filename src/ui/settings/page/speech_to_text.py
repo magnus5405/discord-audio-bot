@@ -8,7 +8,6 @@ from textual.widgets import Button, Input, Label, Select
 
 from src.storage import (
     DEFAULT_LOCAL_STT_BACKEND,
-    DEFAULT_LOCAL_STT_MODEL,
     DEFAULT_STT_LANGUAGE_CODE,
 )
 from src.transcription.whispercpp import WHISPERCPP_MODEL_IDS

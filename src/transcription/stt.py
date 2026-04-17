@@ -44,7 +44,7 @@ class STTClient(Protocol):
 
     async def validate_connectivity(self) -> None: ...
 
-    async def stream_recognize(
+    def stream_recognize(
         self,
         audio_stream: AsyncIterator[bytes],
         user_id: int,

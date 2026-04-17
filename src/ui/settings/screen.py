@@ -11,7 +11,17 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Label, Select, TabbedContent, TabPane, TextArea
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Label,
+    Select,
+    TabbedContent,
+    TabPane,
+    TextArea,
+)
 
 from src.main import (
     resolve_mention_window_seconds,
