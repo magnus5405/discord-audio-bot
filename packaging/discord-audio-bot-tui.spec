@@ -5,7 +5,7 @@ import struct
 import sys
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 block_cipher = None
 
@@ -28,11 +28,14 @@ hiddenimports = (
     + collect_submodules("discord")
     + collect_submodules("google.cloud.speech_v1")
     + collect_submodules("google.cloud.speech_v2")
+    + collect_submodules("pywhispercpp")
     + [
         "discord.ext.voice_recv",
         "discord.ext.commands",
         "google.genai",
         "elevenlabs",
+        "pywhispercpp",
+        "_pywhispercpp",
         "pydub",
         "webrtcvad",
         "google.api_core",
@@ -42,7 +45,12 @@ hiddenimports = (
     ]
 )
 
-datas = collect_data_files("textual") + [(str(_default_settings_src), ".")]
+datas = (
+    collect_data_files("textual")
+    + collect_data_files("pywhispercpp")
+    + [(str(_default_settings_src), ".")]
+)
+binaries = collect_dynamic_libs("pywhispercpp")
 
 _ffmpeg_bins = ensure_ffmpeg_binaries(project_root)
 
@@ -61,7 +69,7 @@ if sys.platform == "win32":
 a = Analysis(
     [str(entry_script)],
     pathex=[str(project_root)],
-    binaries=_ffmpeg_bins + _discord_opus_bins,
+    binaries=binaries + _ffmpeg_bins + _discord_opus_bins,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
