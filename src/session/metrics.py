@@ -16,6 +16,8 @@ class SessionMetrics:
     genai_input_tokens: int = 0
     genai_output_tokens: int = 0
     stt_seconds: float = 0.0
+    stt_inference_seconds_total: float = 0.0
+    stt_inference_runs: int = 0
     tts_characters: int = 0
     status_line: str = "idle"
     guild_label: str = ""
@@ -34,6 +36,8 @@ class SessionMetrics:
         self.mention_waiting = False
         self.mention_seconds_left = 0.0
         self.cooldown_seconds_left = 0.0
+        self.stt_inference_seconds_total = 0.0
+        self.stt_inference_runs = 0
 
     def session_duration_seconds(self) -> float:
         return time.monotonic() - self.session_started_at
@@ -41,6 +45,16 @@ class SessionMetrics:
     def add_stt_seconds(self, delta: float) -> None:
         if delta > 0:
             self.stt_seconds += delta
+
+    def add_stt_inference_seconds(self, delta: float) -> None:
+        if delta > 0:
+            self.stt_inference_seconds_total += delta
+            self.stt_inference_runs += 1
+
+    def average_stt_inference_seconds(self) -> float | None:
+        if self.stt_inference_runs <= 0:
+            return None
+        return self.stt_inference_seconds_total / float(self.stt_inference_runs)
 
     def append_transcript_line(self, line: str) -> None:
         text = (line or "").strip()

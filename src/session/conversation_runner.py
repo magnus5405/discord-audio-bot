@@ -24,7 +24,6 @@ from ..conversation import (
 from ..conversation.chat import format_join_greeting_prompt, format_user_join_greeting_prompt
 from ..discord import DiscordAudioSink, DiscordClient, VoicePlaybackManager
 from ..models import AudioFrame, Persona, TranscriptSegment
-from ..runtime_ffmpeg import probe_audio_duration_seconds
 from ..storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
 from ..storage.transcripts import attach_active_transcript_writer, detach_active_transcript_writer
 from ..transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
@@ -178,15 +177,26 @@ async def run_voice_conversation(
         str(stt_config.get("language_code", DEFAULT_STT_LANGUAGE_CODE)).strip()
         or DEFAULT_STT_LANGUAGE_CODE
     )
+
+    def on_stt_inference_seconds(delta: float) -> None:
+        if delta <= 0 or metrics is None:
+            return
+        metrics.add_stt_inference_seconds(delta)
+
     stt_client = GoogleSTTClient(
         primary_language=stt_primary_language,
         alternative_languages=stt_config.get("alternative_language_codes", ["en-US"]),
+        provider=settings_store.resolve_stt_provider(),
         api_key=settings_store.resolve_stt_api_key(),
         project_id=settings_store.resolve_stt_project_id(),
         location=settings_store.resolve_stt_location(),
         model=settings_store.resolve_stt_model(),
         credentials_path=settings_store.resolve_stt_credentials_path(),
         speech_backend=settings_store.resolve_stt_speech_backend(),
+        local_backend=settings_store.resolve_stt_local_backend(),
+        local_model=settings_store.resolve_stt_local_model(),
+        local_models_dir=str(settings_store.resolve_stt_local_models_dir_path()),
+        on_inference_seconds=on_stt_inference_seconds,
     )
     await stt_client.validate_connectivity()
 
@@ -223,13 +233,14 @@ async def run_voice_conversation(
         try:
             if metrics is not None:
                 metrics.status_line = "playing audio"
+            playback_started_at = time.perf_counter()
             await playback_manager.play_file(Path(audio_path))
             try:
-                duration_seconds = float(probe_audio_duration_seconds(audio_path))
+                duration_seconds = max(0.0, time.perf_counter() - playback_started_at)
                 tts_client.record_tts_duration(duration_seconds)
                 transcript_writer.add_tts_seconds(duration_seconds)
             except Exception as exc:
-                logger.warning("TTS duration probe failed: %s", exc)
+                logger.warning("TTS playback timing capture failed: %s", exc)
             char_count = len(stripped)
             tts_client.record_tts_characters(char_count)
             transcript_writer.add_tts_characters(char_count)
@@ -344,11 +355,19 @@ async def run_voice_conversation(
                     if not policy.should_trigger_reply(has_pending_transcript=pending):
                         continue
                     logger.info("Reply trigger fired; pausing voice receive for GenAI.")
-                    if metrics is not None:
-                        metrics.status_line = "generating reply"
                     if discord_client.is_listening():
                         await discord_client.stop_listening()
                     try:
+                        if coordinator.has_pending_work:
+                            logger.info("Waiting for pending STT work to drain before generating a reply.")
+                            if metrics is not None:
+                                metrics.status_line = "waiting for transcription"
+                            await coordinator.wait_for_idle()
+                        if not conversation_log.has_pending_since_bot():
+                            logger.info("Reply trigger cleared after waiting for STT; resuming listening.")
+                            continue
+                        if metrics is not None:
+                            metrics.status_line = "generating reply"
                         prompt = chat_manager.format_conversation_prompt(
                             conversation_log.get_conversation_for_prompt()
                         )
