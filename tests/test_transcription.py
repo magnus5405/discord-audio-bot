@@ -783,7 +783,7 @@ def test_whispercpp_client_maps_segments_and_normalizes_language_hints(monkeypat
     assert segments[1].end_ts == pytest.approx(100.25)
 
 
-def test_whispercpp_client_uses_auto_language_for_multiple_distinct_hints(monkeypatch, tmp_path) -> None:
+def test_whispercpp_client_prefers_primary_language_when_alternatives_differ(monkeypatch, tmp_path) -> None:
     model_path = tmp_path / "ggml-base.bin"
     model_path.write_bytes(b"model")
     seen: dict[str, object] = {}
@@ -813,9 +813,9 @@ def test_whispercpp_client_uses_auto_language_for_multiple_distinct_hints(monkey
         )
     )
 
-    assert seen["language"] == "auto"
+    assert seen["language"] == "da"
     assert segment is not None
-    assert segment.language_code is None
+    assert segment.language_code == "da-DK"
 
 
 def test_whispercpp_client_ignores_blank_audio_placeholder_segments(monkeypatch, tmp_path) -> None:

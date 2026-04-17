@@ -68,6 +68,7 @@ class BotDashboardApp(App[None]):
         self._connect_task: asyncio.Task[None] | None = None
         self._user_stopped_session = False
         self._transcript_snapshot: tuple[str, ...] = ()
+        self._transcript_rendered_lines = 0
         self._refreshing = False
         self._channels_loading = False
         self._last_status_line = ""
@@ -151,9 +152,12 @@ class BotDashboardApp(App[None]):
             return
         self._transcript_snapshot = snapshot
         log = self.query_one("#transcript_log", RichLog)
-        log.clear()
-        for line in snapshot:
+        if len(snapshot) < self._transcript_rendered_lines:
+            log.clear()
+            self._transcript_rendered_lines = 0
+        for line in snapshot[self._transcript_rendered_lines :]:
             log.write(line)
+        self._transcript_rendered_lines = len(snapshot)
         log.scroll_end(animate=False)
 
     def _loading(self) -> bool:
@@ -219,6 +223,7 @@ class BotDashboardApp(App[None]):
         self._show_session_dashboard(False)
         self.query_one("#transcript_wrap").display = False
         self._transcript_snapshot = ()
+        self._transcript_rendered_lines = 0
         self.query_one("#persona_select", Select).disabled = False
         self.query_one("#persona_hint", Static).update("")
 
@@ -323,51 +328,54 @@ class BotDashboardApp(App[None]):
             self.call_later(self._sync_selector_loader_visibility)
 
     def _refresh_metrics_bar(self) -> None:
-        metrics = self._metrics
-        if self._session_live():
-            rates = self._settings_store.resolve_pricing_config()
-            stt_minutes = metrics.stt_seconds / 60.0
-            self.query_one("#dash_session_timer", MetricTile).set_value(
-                format_session_timer(metrics.session_duration_seconds())
-            )
-            self.query_one("#dash_stt_minutes", MetricTile).set_value(
-                format_stt_minutes_with_price(
-                    stt_minutes,
-                    rates["google_stt_usd_per_minute"],
-                    provider=self._settings_store.resolve_stt_provider(),
-                    average_inference_seconds=metrics.average_stt_inference_seconds(),
+        try:
+            metrics = self._metrics
+            if self._session_live():
+                rates = self._settings_store.resolve_pricing_config()
+                stt_minutes = metrics.stt_seconds / 60.0
+                self.query_one("#dash_session_timer", MetricTile).set_value(
+                    format_session_timer(metrics.session_duration_seconds())
                 )
-            )
-            self.query_one("#dash_tokens", MetricTile).set_value(
-                format_genai_tokens_with_price(
-                    metrics.genai_input_tokens,
-                    metrics.genai_output_tokens,
-                    rates["genai_usd_per_1m_input_tokens"],
-                    rates["genai_usd_per_1m_output_tokens"],
+                self.query_one("#dash_stt_minutes", MetricTile).set_value(
+                    format_stt_minutes_with_price(
+                        stt_minutes,
+                        rates["google_stt_usd_per_minute"],
+                        provider=self._settings_store.resolve_stt_provider(),
+                        average_inference_seconds=metrics.average_stt_inference_seconds(),
+                    )
                 )
-            )
-            self.query_one("#dash_eleven_chars", MetricTile).set_value(
-                format_eleven_chars_with_price(
-                    metrics.tts_characters,
-                    rates["elevenlabs_usd_per_1k_characters"],
+                self.query_one("#dash_tokens", MetricTile).set_value(
+                    format_genai_tokens_with_price(
+                        metrics.genai_input_tokens,
+                        metrics.genai_output_tokens,
+                        rates["genai_usd_per_1m_input_tokens"],
+                        rates["genai_usd_per_1m_output_tokens"],
+                    )
                 )
-            )
-            self.query_one("#dash_cooldown", MetricTile).set_value(
-                format_cooldown_tile(metrics.cooldown_seconds_left)
-            )
-            self.query_one("#dash_mention", MetricTile).set_value(format_mention_tile(metrics))
-            self._sync_transcript_log()
-            self._set_status(metrics.status_line)
+                self.query_one("#dash_eleven_chars", MetricTile).set_value(
+                    format_eleven_chars_with_price(
+                        metrics.tts_characters,
+                        rates["elevenlabs_usd_per_1k_characters"],
+                    )
+                )
+                self.query_one("#dash_cooldown", MetricTile).set_value(
+                    format_cooldown_tile(metrics.cooldown_seconds_left)
+                )
+                self.query_one("#dash_mention", MetricTile).set_value(format_mention_tile(metrics))
+                self._sync_transcript_log()
 
-        if self._session_task and self._session_task.done():
-            self._session_task = None
-            self._reset_session_ui()
-            if metrics.last_error:
-                self._set_status(f"Session ended: {metrics.last_error}")
-            elif not self._user_stopped_session:
-                self._set_status("Session finished.")
-            self._user_stopped_session = False
-            self.call_later(self._sync_start_button_state)
+            if self._session_task and self._session_task.done():
+                self._session_task = None
+                self._reset_session_ui()
+                if metrics.last_error:
+                    self._set_status(f"Session ended: {metrics.last_error}")
+                elif not self._user_stopped_session:
+                    self._set_status("Session finished.")
+                self._user_stopped_session = False
+                self.call_later(self._sync_start_button_state)
+        except Exception:
+            logger.exception("Dashboard metrics refresh failed")
+            self._set_status("Dashboard metrics refresh failed; check logs.")
 
     @on(DataTable.RowHighlighted, "#guild_table")
     async def on_guild_highlight(self, event: DataTable.RowHighlighted) -> None:
@@ -501,6 +509,7 @@ class BotDashboardApp(App[None]):
         self._show_session_dashboard(True)
         self.query_one("#transcript_wrap").display = True
         self._transcript_snapshot = ()
+        self._transcript_rendered_lines = 0
         self.query_one("#transcript_log", RichLog).clear()
         self.query_one("#persona_select", Select).disabled = True
         self._metrics = SessionMetrics()

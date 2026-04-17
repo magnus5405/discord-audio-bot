@@ -35,14 +35,14 @@ logger = logging.getLogger(__name__)
 _DISCORD_NICKNAME_MAX_LEN = 32
 
 
-def _unlink_temp_file(path: Path) -> None:
-    """Delete a temp file; retry briefly on Windows when the file is still locked."""
+async def _unlink_temp_file_async(path: Path) -> None:
+    """Delete a temp file; retry without blocking the asyncio event loop."""
     for _ in range(20):
         try:
             path.unlink(missing_ok=True)
             return
         except PermissionError:
-            time.sleep(0.05)
+            await asyncio.sleep(0.05)
     with suppress(PermissionError):
         path.unlink(missing_ok=True)
 
@@ -251,7 +251,7 @@ async def run_voice_conversation(
                 metrics.genai_output_tokens = out
                 metrics.total_tokens = inp + out
         finally:
-            _unlink_temp_file(Path(audio_path))
+            await _unlink_temp_file_async(Path(audio_path))
 
     audio_queue: asyncio.Queue[AudioFrame] = asyncio.Queue()
 

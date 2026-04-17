@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import sys
+import threading
 import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -41,6 +42,63 @@ _WHISPERCPP_DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 _WHISPERCPP_SAMPLE_RATE_HZ = 16000
 _WHISPERCPP_TIMESTAMP_SECONDS = 0.01
 _IGNORED_TRANSCRIPT_TEXT_CASEFOLDS = frozenset({"[blank_audio]"})
+
+_WINDOWS_NATIVE_STDERR_REDIRECT_LOCK = threading.Lock()
+_WINDOWS_NATIVE_STDERR_REDIRECT_DONE = False
+_WINDOWS_NATIVE_STDERR_STREAM: Any | None = None
+
+
+def _windows_native_redirect_enabled() -> bool:
+    """Whether risky native stdio swapping is explicitly enabled on Windows.
+
+    Default is disabled to keep Textual responsive. Enable only for debugging.
+    """
+    raw = (os.getenv("WHISPERCPP_WINDOWS_NATIVE_REDIRECT") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _resolve_whispercpp_native_log_path() -> Path:
+    """Dedicated sink for native whisper.cpp stderr on Windows.
+
+    Keep this separate from app logs so native lines never paint over the TUI.
+    """
+    target = _resolve_whispercpp_log_redirect_target()
+    if isinstance(target, str) and target.strip():
+        try:
+            base_path = Path(target)
+            if base_path.name:
+                return base_path.with_name("whispercpp-native.log")
+        except Exception:
+            pass
+    return app_bundle_dir() / "logs" / "whispercpp-native.log"
+
+
+def _ensure_windows_native_stderr_redirected(log_path: Path) -> None:
+    """Route process stderr to *log_path* once to capture native whisper.cpp output."""
+    global _WINDOWS_NATIVE_STDERR_REDIRECT_DONE
+    global _WINDOWS_NATIVE_STDERR_STREAM
+
+    if os.name != "nt":
+        return
+    if _WINDOWS_NATIVE_STDERR_REDIRECT_DONE:
+        return
+
+    with _WINDOWS_NATIVE_STDERR_REDIRECT_LOCK:
+        if _WINDOWS_NATIVE_STDERR_REDIRECT_DONE:
+            return
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        stream = open(log_path, "a", encoding="utf-8", buffering=1)
+        try:
+            with suppress(Exception):
+                sys.stderr.flush()
+            os.dup2(stream.fileno(), 2)
+        except Exception:
+            with suppress(Exception):
+                stream.close()
+            raise
+        _WINDOWS_NATIVE_STDERR_STREAM = stream
+        _WINDOWS_NATIVE_STDERR_REDIRECT_DONE = True
+        logger.info("whisper.cpp native stderr redirected to %s", log_path)
 
 
 def _available_cpu_threads() -> int:
@@ -184,17 +242,20 @@ def _safe_pywhispercpp_redirect_stream(
     active_fd: int | None = None
     target_fd: int | None = None
     windows_handle_state: tuple[object, object, object] | None = None
-    if hasattr(stream, "fileno"):
+    # On Windows this redirection path can freeze Textual's writer thread. Keep it
+    # disabled by default there unless explicitly opted in for debugging.
+    allow_fd_swap = os.name != "nt" or _windows_native_redirect_enabled()
+    if allow_fd_swap and hasattr(stream, "fileno"):
         try:
             target_fd = int(stream.fileno())
         except (AttributeError, OSError, ValueError):
             target_fd = None
-    if target_fd is not None:
+    if os.name != "nt" and target_fd is not None:
         windows_handle_state = _redirect_windows_standard_handle(
             fallback_stream_name,
             target_fd=target_fd,
         )
-    if target_fd is not None:
+    if allow_fd_swap and target_fd is not None:
         for fd in candidate_fd_values:
             try:
                 saved_fd = os.dup(fd)
@@ -202,7 +263,7 @@ def _safe_pywhispercpp_redirect_stream(
                 break
             except OSError:
                 continue
-    if saved_fd is not None and active_fd is not None and target_fd is not None:
+    if allow_fd_swap and saved_fd is not None and active_fd is not None and target_fd is not None:
         try:
             os.dup2(target_fd, active_fd)
             yield
@@ -382,22 +443,25 @@ def _configured_language_preferences(
     primary_language: str,
     alternative_languages: list[str] | None,
 ) -> tuple[str | None, str | None]:
-    """Convert BCP-47 hints into Whisper-friendly primary subtags."""
-    distinct_primary_subtags: list[str] = []
-    preferred_bcp47: str | None = None
-    for raw_code in [primary_language, *(alternative_languages or [])]:
-        cleaned = str(raw_code or "").strip()
-        if not cleaned:
-            continue
-        if preferred_bcp47 is None:
-            preferred_bcp47 = cleaned
-        subtag = cleaned.split("-", 1)[0].strip().lower()
-        if not subtag or subtag in distinct_primary_subtags:
-            continue
-        distinct_primary_subtags.append(subtag)
-    if len(distinct_primary_subtags) == 1:
-        return distinct_primary_subtags[0], preferred_bcp47
-    return None, None
+    """Convert BCP-47 hints into a Whisper language hint and transcript language code.
+
+    Always prefer the configured primary language as Whisper hint. This prevents
+    accidental fallback to auto-detection when alternatives contain different
+    subtags (for example primary=da-DK and alternatives include en-US).
+    """
+    preferred_bcp47 = str(primary_language or "").strip() or None
+    if preferred_bcp47 is None:
+        for raw_code in alternative_languages or []:
+            cleaned = str(raw_code or "").strip()
+            if cleaned:
+                preferred_bcp47 = cleaned
+                break
+    if preferred_bcp47 is None:
+        return None, None
+    subtag = preferred_bcp47.split("-", 1)[0].strip().lower()
+    if not subtag:
+        return None, preferred_bcp47
+    return subtag, preferred_bcp47
 
 
 def pcm16_bytes_to_float32(audio_bytes: bytes):
@@ -442,9 +506,16 @@ class WhisperCppSTTClient:
         )
         self._n_threads = _available_cpu_threads()
         self._log_redirect_target = _resolve_whispercpp_log_redirect_target()
+        self._native_log_path = _resolve_whispercpp_native_log_path()
         self._on_inference_seconds = on_inference_seconds
         self._model: Any | None = None
         self._inference_lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        if os.name == "nt":
+            try:
+                _ensure_windows_native_stderr_redirected(self._native_log_path)
+            except Exception:
+                logger.warning("Failed to redirect whisper.cpp native stderr", exc_info=True)
         logger.info(
             "WhisperCppSTTClient initialized: model=%s models_dir=%s language_hint=%s threads=%s",
             self.local_model,
@@ -495,12 +566,19 @@ class WhisperCppSTTClient:
 
     def _transcribe_sync(self, audio_f32):
         model = self._ensure_model_loaded_sync()
-        params: dict[str, object] = {"language": self._language_hint or "auto"}
+        params: dict[str, object] = {}
+        if self._language_hint:
+            params["language"] = self._language_hint
         started_at = time.perf_counter()
         try:
-            with _safe_pywhispercpp_redirect_stdout(self._log_redirect_target):
-                with _safe_pywhispercpp_redirect_stderr(self._log_redirect_target):
-                    result = model.transcribe(audio_f32, **params)
+            # Native redirection during active transcription can deadlock Textual on
+            # Windows. Keep runtime redirection off by default there.
+            if os.name == "nt" and not _windows_native_redirect_enabled():
+                result = model.transcribe(audio_f32, **params)
+            else:
+                with _safe_pywhispercpp_redirect_stdout(self._log_redirect_target):
+                    with _safe_pywhispercpp_redirect_stderr(self._log_redirect_target):
+                        result = model.transcribe(audio_f32, **params)
         except Exception as exc:
             raise RuntimeError(
                 "Local whisper.cpp transcription failed. Verify the selected model file is valid "
@@ -508,11 +586,23 @@ class WhisperCppSTTClient:
             ) from exc
         elapsed_seconds = time.perf_counter() - started_at
         if self._on_inference_seconds is not None:
-            try:
-                self._on_inference_seconds(elapsed_seconds)
-            except Exception:
-                logger.warning("Local STT inference observer failed.", exc_info=True)
+            loop = self._loop
+            if loop is not None and loop.is_running():
+                try:
+                    loop.call_soon_threadsafe(self._notify_inference_seconds, elapsed_seconds)
+                except RuntimeError:
+                    self._notify_inference_seconds(elapsed_seconds)
+            else:
+                self._notify_inference_seconds(elapsed_seconds)
         return result
+
+    def _notify_inference_seconds(self, elapsed_seconds: float) -> None:
+        if self._on_inference_seconds is None:
+            return
+        try:
+            self._on_inference_seconds(elapsed_seconds)
+        except Exception:
+            logger.warning("Local STT inference observer failed.", exc_info=True)
 
     def _map_segments(
         self,
@@ -544,6 +634,8 @@ class WhisperCppSTTClient:
 
     async def validate_connectivity(self) -> None:
         """Fail fast when the local binding or model file is not usable."""
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         async with self._inference_lock:
             await asyncio.to_thread(self._ensure_model_loaded_sync)
         logger.info("Local whisper.cpp STT validation succeeded.")
@@ -556,6 +648,8 @@ class WhisperCppSTTClient:
         username: str,
         utterance_started_at: float,
     ) -> list[TranscriptSegment]:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         audio_f32 = pcm16_bytes_to_float32(audio_bytes)
         if int(getattr(audio_f32, "size", 0)) <= 0:
             return []
