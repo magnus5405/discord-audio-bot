@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,6 +20,8 @@ _ffmpeg_cached: str | None = None
 _ffprobe_resolved = False
 _ffprobe_cached: str | None = None
 _pydub_configured = False
+_FFPROBE_DURATION_TIMEOUT_SECONDS = 15
+_FFMPEG_DURATION_TIMEOUT_SECONDS = 30
 
 
 def resolve_ffmpeg_executable() -> str:
@@ -109,7 +112,7 @@ def probe_audio_duration_seconds(path: Path | str) -> float:
                 ],
                 stderr=subprocess.DEVNULL,
                 text=True,
-                timeout=60,
+                timeout=_FFPROBE_DURATION_TIMEOUT_SECONDS,
             )
             data = json.loads(out)
             dur = data.get("format", {}).get("duration")
@@ -123,7 +126,7 @@ def probe_audio_duration_seconds(path: Path | str) -> float:
         [ffmpeg, "-nostats", "-i", str(p), "-f", "null", "-"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=_FFMPEG_DURATION_TIMEOUT_SECONDS,
     )
     stderr = proc.stderr or ""
     match = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", stderr)
@@ -135,6 +138,11 @@ def probe_audio_duration_seconds(path: Path | str) -> float:
         )
     hours, minutes, seconds = int(match.group(1)), int(match.group(2)), float(match.group(3))
     return hours * 3600 + minutes * 60 + seconds
+
+
+async def probe_audio_duration_seconds_async(path: Path | str) -> float:
+    """Resolve audio duration in a worker thread so the UI loop stays responsive."""
+    return await asyncio.to_thread(probe_audio_duration_seconds, path)
 
 
 def configure_pydub_once() -> None:
