@@ -653,6 +653,16 @@ def _create_google_stt_client(
             api_key=raw_api,
         )
     if backend in ("v2", "2"):
+        if project_id is not None and GoogleSTTV2Client._looks_like_ai_studio_project_id(
+            str(project_id).strip()
+        ):
+            raise ValueError(
+                "Speech-to-Text v2 cannot use Google AI Studio project ids (gen-lang-client-*). "
+                "Use a Google Cloud project id from https://console.cloud.google.com, or remove "
+                "GOOGLE_STT_SPEECH_BACKEND=v2 / clear the Speech backend field in settings to allow "
+                "automatic legacy v1 with GOOGLE_STT_API_KEY. "
+                "Check .env spells GOOGLE_STT_API_KEY correctly (not OOGLE_STT_API_KEY)."
+            )
         resolved_project = GoogleSTTV2Client._resolve_project_id(project_id, credentials_path)
         if GoogleSTTV2Client._looks_like_ai_studio_project_id(resolved_project):
             raise ValueError(

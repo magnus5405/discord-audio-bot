@@ -551,6 +551,7 @@ def test_google_stt_factory_v2_with_ai_studio_project_raises() -> None:
 def test_google_stt_client_falls_back_to_v1_when_only_api_key_no_project(monkeypatch):
     """Without a v2 project or service account, ``GOOGLE_STT_API_KEY`` selects legacy Speech v1."""
     monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GOOGLE_STT_SPEECH_BACKEND", raising=False)
     monkeypatch.setenv("GOOGLE_STT_API_KEY", "key-present")
     monkeypatch.delenv("GOOGLE_STT_PROJECT_ID", raising=False)
     monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
