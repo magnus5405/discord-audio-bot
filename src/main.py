@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import inspect
 import logging
 import os
 import sys
@@ -26,7 +25,6 @@ from src.runtime_dirs import app_bundle_dir, load_application_dotenv
 from src.session import ConversationRunnerConfig, run_voice_conversation
 from src.storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore, TranscriptSessionWriter
 from src.storage.reply_locale import resolve_bot_reply_language_code
-from src.storage.transcripts import attach_active_transcript_writer, detach_active_transcript_writer
 from src.transcription import GoogleSTTClient, PerUserTranscriptionCoordinator
 from src.tts import resolve_elevenlabs_api_key
 
@@ -371,7 +369,6 @@ async def run_transcription_mode(
     listen_window_seconds: float | None,
     *,
     settings_store: SettingsStore | None = None,
-    user_audio_allowed: Callable[[int], bool] | None = None,
 ) -> None:
     """Run transcription until interrupted or the optional time window elapses."""
     settings_store = settings_store or SettingsStore()
@@ -418,7 +415,6 @@ async def run_transcription_mode(
         audio_queue=audio_queue,
         loop=asyncio.get_running_loop(),
         use_opus=False,
-        user_audio_allowed=user_audio_allowed,
     )
     runtime_task = asyncio.create_task(
         asyncio.sleep(listen_window_seconds)
@@ -439,7 +435,6 @@ async def run_transcription_mode(
     )
 
     try:
-        attach_active_transcript_writer(transcript_writer)
         await discord_client.start_listening(sink)
         done, _ = await asyncio.wait(
             {consumer_task, runtime_task},
@@ -450,19 +445,16 @@ async def run_transcription_mode(
         else:
             await runtime_task
     finally:
-        try:
-            runtime_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await runtime_task
+        runtime_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await runtime_task
 
-            if discord_client.is_listening():
-                await discord_client.stop_listening()
+        if discord_client.is_listening():
+            await discord_client.stop_listening()
 
-            consumer_stop_event.set()
-            await consumer_task
-            logger.info("Transcription stopped. Snapshot saved to %s", transcript_writer.path)
-        finally:
-            detach_active_transcript_writer(transcript_writer)
+        consumer_stop_event.set()
+        await consumer_task
+        logger.info("Transcription stopped. Snapshot saved to %s", transcript_writer.path)
 
 
 async def run_async(args: Namespace) -> None:
@@ -470,15 +462,7 @@ async def run_async(args: Namespace) -> None:
     configure_logging()
     settings_store = SettingsStore()
     token = get_required_token(settings_store)
-    resolve_guild = getattr(settings_store, "resolve_discord_int", None)
-    sync_guild = (
-        resolve_guild("server_id", "DISCORD_SERVER_ID") if callable(resolve_guild) else None
-    )
-    dc_params = inspect.signature(DiscordClient.__init__).parameters
-    dc_kwargs: dict[str, object] = {}
-    if "app_command_sync_guild_id" in dc_params:
-        dc_kwargs["app_command_sync_guild_id"] = sync_guild
-    discord_client = DiscordClient(token, **dc_kwargs)
+    discord_client = DiscordClient(token)
 
     try:
         headless_modes = (args.receive_smoke, args.transcribe, args.converse)
@@ -533,7 +517,6 @@ async def run_async(args: Namespace) -> None:
                 elevenlabs_api_key=elevenlabs_key,
                 settings_store=settings_store,
                 runner_config=runner_config,
-                user_audio_allowed=voice_user_audio_allowed(discord_client),
             )
             return
 
@@ -544,7 +527,6 @@ async def run_async(args: Namespace) -> None:
                 voice_client=voice_client,
                 listen_window_seconds=listen_window_seconds,
                 settings_store=settings_store,
-                user_audio_allowed=voice_user_audio_allowed(discord_client),
             )
             return
 
@@ -566,43 +548,15 @@ async def run_async(args: Namespace) -> None:
         await discord_client.disconnect()
 
 
-def _run_tui_cli(args: Namespace) -> int:
-    """Start the Textual dashboard.
+async def run(argv: Sequence[str] | None = None) -> int:
+    """Run CLI logic asynchronously (``main`` wraps this in ``asyncio.run``; tests await it)."""
+    load_application_dotenv()
+    args = parse_args(argv)
 
-    Textual's ``App.run()`` uses ``asyncio.run()`` internally, so this must not be
-    invoked from inside another ``asyncio.run`` (e.g. the headless CLI wrapper).
-    """
-    if (
-        args.list_voice_channels
-        or args.receive_smoke
-        or args.transcribe
-        or args.converse
-    ):
-        print(
-            "--tui cannot be combined with --list-voice-channels, --receive-smoke, "
-            "--transcribe, or --converse."
-        )
+    if args.tui:
+        print("--tui must be launched via the synchronous CLI entrypoint.")
         return 1
-    if args.channel_id is not None or args.audio_path is not None:
-        print("--tui does not use --channel-id or --audio-path; pick a channel in the UI.")
-        return 1
-    if args.listen_window_seconds is not None:
-        print("--tui does not use --listen-window-seconds.")
-        return 1
-    try:
-        from src.ui.dashboard.app import run_tui_application
 
-        run_tui_application()
-    except KeyboardInterrupt:
-        return 130
-    except (RuntimeError, ValueError) as exc:
-        print(f"{exc}")
-        return 1
-    return 0
-
-
-async def _run_headless_async(args: Namespace) -> int:
-    """Discord smoke / converse / transcribe paths (single asyncio event loop)."""
     try:
         await run_async(args)
     except KeyboardInterrupt:
@@ -615,31 +569,43 @@ async def _run_headless_async(args: Namespace) -> int:
     return 0
 
 
-async def run(argv: Sequence[str] | None = None) -> int:
-    """Async CLI entry for headless modes (tests ``await`` this). ``--tui`` is synchronous."""
-    load_application_dotenv()
-    args = parse_args(argv)
-
-    if args.tui:
-        return _run_tui_cli(args)
-
-    return await _run_headless_async(args)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     """Synchronous entrypoint for the smoke runner or ``--tui`` dashboard."""
     load_application_dotenv()
     args = parse_args(argv)
 
     if args.tui:
+        if (
+            args.list_voice_channels
+            or args.receive_smoke
+            or args.transcribe
+            or args.converse
+        ):
+            print(
+                "--tui cannot be combined with --list-voice-channels, --receive-smoke, "
+                "--transcribe, or --converse."
+            )
+            return 1
+        if args.channel_id is not None or args.audio_path is not None:
+            print("--tui does not use --channel-id or --audio-path; pick a channel in the UI.")
+            return 1
+        if args.listen_window_seconds is not None:
+            print("--tui does not use --listen-window-seconds.")
+            return 1
         try:
-            return _run_tui_cli(args)
+            from src.ui.dashboard.app import run_tui_application
+
+            run_tui_application()
         except KeyboardInterrupt:
             logger.warning("Interrupted by user.")
             return 130
+        except (RuntimeError, ValueError) as exc:
+            print(f"{exc}")
+            return 1
+        return 0
 
     try:
-        return asyncio.run(_run_headless_async(args))
+        return asyncio.run(run(argv))
     except KeyboardInterrupt:
         logger.warning("Interrupted by user.")
         return 130
