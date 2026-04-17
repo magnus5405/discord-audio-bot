@@ -74,9 +74,12 @@ class GoogleSTTV2Client:
                 ``GOOGLE_STT_MODEL`` when omitted; defaults to ``chirp_3`` if unset (required by the API).
             credentials_path: Optional path to a Google service-account JSON file.
         """
-        from src.runtime_dirs import load_application_dotenv
+        try:
+            from dotenv import load_dotenv
 
-        load_application_dotenv()
+            load_dotenv()
+        except ImportError:
+            pass
         self.primary_language = primary_language
         self.alternative_languages = alternative_languages or ["en-US"]
         self._chirp3_lang_trim_log_done = False
@@ -617,9 +620,12 @@ def _create_google_stt_client(
     speech_backend: str | None = None,
 ) -> GoogleSTTV2Client | GoogleSTTV1Client:
     """Pick v1 or v2: ``speech_backend`` / env, else v1 for AI Studio ids when an API key exists."""
-    from src.runtime_dirs import load_application_dotenv
+    try:
+        from dotenv import load_dotenv
 
-    load_application_dotenv()
+        load_dotenv()
+    except ImportError:
+        pass
     if client is not None:
         return GoogleSTTV2Client(
             primary_language=primary_language,
