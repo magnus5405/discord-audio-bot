@@ -74,9 +74,12 @@ class GoogleSTTV2Client:
                 ``GOOGLE_STT_MODEL`` when omitted; defaults to ``chirp_3`` if unset (required by the API).
             credentials_path: Optional path to a Google service-account JSON file.
         """
-        from src.runtime_dirs import load_application_dotenv
+        try:
+            from dotenv import load_dotenv
 
-        load_application_dotenv()
+            load_dotenv()
+        except ImportError:
+            pass
         self.primary_language = primary_language
         self.alternative_languages = alternative_languages or ["en-US"]
         self._chirp3_lang_trim_log_done = False
@@ -617,9 +620,12 @@ def _create_google_stt_client(
     speech_backend: str | None = None,
 ) -> GoogleSTTV2Client | GoogleSTTV1Client:
     """Pick v1 or v2: ``speech_backend`` / env, else v1 for AI Studio ids when an API key exists."""
-    from src.runtime_dirs import load_application_dotenv
+    try:
+        from dotenv import load_dotenv
 
-    load_application_dotenv()
+        load_dotenv()
+    except ImportError:
+        pass
     if client is not None:
         return GoogleSTTV2Client(
             primary_language=primary_language,
@@ -647,6 +653,16 @@ def _create_google_stt_client(
             api_key=raw_api,
         )
     if backend in ("v2", "2"):
+        if project_id is not None and GoogleSTTV2Client._looks_like_ai_studio_project_id(
+            str(project_id).strip()
+        ):
+            raise ValueError(
+                "Speech-to-Text v2 cannot use Google AI Studio project ids (gen-lang-client-*). "
+                "Use a Google Cloud project id from https://console.cloud.google.com, or remove "
+                "GOOGLE_STT_SPEECH_BACKEND=v2 / clear the Speech backend field in settings to allow "
+                "automatic legacy v1 with GOOGLE_STT_API_KEY. "
+                "Check .env spells GOOGLE_STT_API_KEY correctly (not OOGLE_STT_API_KEY)."
+            )
         resolved_project = GoogleSTTV2Client._resolve_project_id(project_id, credentials_path)
         if GoogleSTTV2Client._looks_like_ai_studio_project_id(resolved_project):
             raise ValueError(

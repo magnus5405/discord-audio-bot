@@ -23,6 +23,11 @@ def default_settings_path() -> Path:
     return app_bundle_dir() / "settings.json"
 
 
+def default_settings_template_path(settings_path: Optional[Path] = None) -> Path:
+    base_path = settings_path or default_settings_path()
+    return base_path.with_name("settings-example.json")
+
+
 # Used when ``stt.language_code`` is missing or blank (BCP-47).
 DEFAULT_STT_LANGUAGE_CODE = "en-US"
 
@@ -96,18 +101,41 @@ class SettingsStore:
         self.settings: Dict[str, Any] = {}
         self.personas: List[Persona] = []
 
-        if self.settings_path.exists():
-            self.load()
+        source_path = self._resolve_load_path()
+        if source_path is not None:
+            self.load(source_path=source_path)
         else:
             logger.warning(f"Settings file not found: {self.settings_path}")
 
-    def load(self) -> bool:
+    def _resolve_load_path(self) -> Path | None:
+        """Return the persisted settings file, or the bundled example as fallback."""
+        if self.settings_path.exists():
+            return self.settings_path
+
+        template_path = default_settings_template_path(self.settings_path)
+        if template_path.exists():
+            logger.info(
+                "Settings file not found at %s; loading fallback template from %s",
+                self.settings_path,
+                template_path,
+            )
+            return template_path
+        return None
+
+    def load(self, source_path: Optional[Path] = None) -> bool:
         """Load settings from JSON file."""
+        path = source_path or self._resolve_load_path()
+        if path is None:
+            logger.warning(f"Settings file not found: {self.settings_path}")
+            self.settings = {}
+            self.personas = []
+            return False
+
         try:
-            with open(self.settings_path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 self.settings = json.load(f)
 
-            key_dir = self.settings_path.parent
+            key_dir = path.parent
             fernet = (
                 resolve_settings_fernet(key_dir, create=False)
                 if settings_load_requires_fernet_key(self.settings)
@@ -128,7 +156,7 @@ class SettingsStore:
                 for p in personas_data
             ]
 
-            logger.info(f"Settings loaded: {len(self.personas)} personas")
+            logger.info("Settings loaded from %s: %s personas", path, len(self.personas))
             return True
         except (RuntimeError, ValueError):
             raise

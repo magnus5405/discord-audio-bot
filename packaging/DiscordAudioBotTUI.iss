@@ -2,7 +2,7 @@
 ; Run from repo root; expects dist\DiscordAudioBotTUI\
 
 #define MyAppName "Discord Audio Bot TUI"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppExeName "DiscordAudioBotTUI.exe"
 #define MyAppSrc "..\dist\DiscordAudioBotTUI"
 
@@ -28,7 +28,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "{#MyAppSrc}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSrc}\*"; DestDir: "{app}"; Excludes: "settings.json"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

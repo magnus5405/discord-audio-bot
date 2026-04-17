@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,74 @@ from src.tts import resolve_elevenlabs_api_key
 
 def _store(tmp_path: Path) -> SettingsStore:
     return SettingsStore(settings_path=tmp_path / "settings.json")
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> str:
+    text = json.dumps(payload, indent=2)
+    path.write_text(text, encoding="utf-8")
+    return text
+
+
+def _fallback_payload(persona_id: str = "fallback") -> dict[str, object]:
+    return {
+        "personas": [
+            {
+                "id": persona_id,
+                "name": f"{persona_id.title()} Bot",
+                "system_instruction": "Be concise.",
+                "genai_model": "gemini-2.5-flash",
+                "elevenlabs_voice_id": "voice-id",
+            }
+        ],
+        "ui": {
+            "last_guild_id": None,
+            "last_channel_id": None,
+            "last_persona_id": persona_id,
+        },
+        "stt": {"language_code": "en-US"},
+    }
+
+
+def test_loads_settings_example_when_settings_json_missing(tmp_path: Path) -> None:
+    _write_json(tmp_path / "settings-example.json", _fallback_payload())
+
+    store = _store(tmp_path)
+
+    assert [persona.persona_id for persona in store.personas] == ["fallback"]
+    assert store.get_ui_preferences()["last_persona_id"] == "fallback"
+    assert not (tmp_path / "settings.json").exists()
+
+
+def test_save_after_settings_example_fallback_creates_settings_json(tmp_path: Path) -> None:
+    template_path = tmp_path / "settings-example.json"
+    original_template = _write_json(template_path, _fallback_payload())
+    store = _store(tmp_path)
+
+    store.update_ui_preference("last_persona_id", "saved")
+
+    assert store.save() is True
+
+    saved_path = tmp_path / "settings.json"
+    saved = json.loads(saved_path.read_text(encoding="utf-8"))
+    assert saved["ui"]["last_persona_id"] == "saved"
+    assert template_path.read_text(encoding="utf-8") == original_template
+
+
+def test_existing_settings_json_takes_precedence_over_template(tmp_path: Path) -> None:
+    _write_json(tmp_path / "settings-example.json", _fallback_payload("template"))
+    _write_json(tmp_path / "settings.json", _fallback_payload("persisted"))
+
+    store = _store(tmp_path)
+
+    assert [persona.persona_id for persona in store.personas] == ["persisted"]
+    assert store.get_ui_preferences()["last_persona_id"] == "persisted"
+
+
+def test_missing_settings_and_template_leaves_store_empty(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    assert store.settings == {}
+    assert store.personas == []
 
 
 def test_reply_cooldown_prefers_settings_over_env(tmp_path: Path) -> None:

@@ -38,7 +38,7 @@ Tagged releases publish **Windows** artifacts on [GitHub Releases](https://githu
 | **`DiscordAudioBotTUI-Setup.exe`** | Inno Setup installer — installs under Program Files, adds a Start Menu entry, and optionally a desktop shortcut. |
 | **`DiscordAudioBotTUI-windows.zip`** | Portable folder — extract anywhere and run `DiscordAudioBotTUI.exe`. |
 
-Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a template `settings.json` beside the app; configure secrets in the **Settings** TUI editor.
+Both bundles include **FFmpeg** next to the executable — no separate FFmpeg install. The build ships a read-only `settings-example.json` beside the app; the real `settings.json` is created only when you save from the **Settings** TUI editor, so upgrades in the same folder preserve your existing config.
 
 ### MacOS / Linux
 No official releases for macOS and Linux, but contributions are welcome to implement this.
@@ -70,13 +70,13 @@ For dashboard behavior, logging paths, and the settings editor, see [Textual das
 These are features that are planned or would be valuable additions to the project in the future.
 
 - **SDK-agnostic interface for AI conversation**  
-The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic.
+The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic. See [#13](https://github.com/magnus5405/discord-audio-bot/issues/13)
 
 - **Local Speech-to-Text**  
-The project currently depends on external speech recognition services. Adding support for local Speech-to-Text would make it possible to run the full voice pipeline on the user’s own machine or server. This would reduce API costs and lower latency in some environments. It would also open the door to supporting popular local transcription engines such as [Whisper](https://github.com/openai/whisper)-based solutions or other on-device speech recognition systems.
+The project currently depends on external speech recognition services. Adding support for local Speech-to-Text would make it possible to run the full voice pipeline on the user’s own machine or server. This would reduce API costs and lower latency in some environments. It would also open the door to supporting popular local transcription engines such as [Whisper](https://github.com/openai/whisper)-based solutions or other on-device speech recognition systems. See [#14](https://github.com/magnus5405/discord-audio-bot/issues/14)
 
 - **Local Text-to-Speech**  
-At the moment, voice synthesis depends on an external provider. This was chosen because ElevenLabs offer fair pricing and great voice models, with support for custom voices. Supporting local Text-to-Speech would allow fully self-hosted voice output, which would be useful for privacy-sensitive setups, offline environments, and users who want to avoid external API costs. It would also make the project more flexible for experimentation with custom voices and open-source speech models.
+At the moment, voice synthesis depends on an external provider. This was chosen because ElevenLabs offer fair pricing and great voice models, with support for custom voices. Supporting local Text-to-Speech would allow fully self-hosted voice output, which would be useful for privacy-sensitive setups, offline environments, and users who want to avoid external API costs. It would also make the project more flexible for experimentation with custom voices and open-source speech models. See [#15](https://github.com/magnus5405/discord-audio-bot/issues/15)
 
 ---
 
@@ -108,12 +108,13 @@ There are two layers:
 1. **`.env`** — secrets and machine-local defaults (loaded via `python-dotenv` on startup).
    `.env.example` documents defaults for reply timing, STT backend, optional pricing hints, `DEBUG_MODE`, and `TUI_LOG_FILE`.
 2. **`settings.json`** in the project root — personas, STT language, UI selections, and optional persisted API keys or Discord fields when you save from the TUI settings editor.
+   When `settings.json` is missing, the app falls back to `settings-example.json` if present and creates `settings.json` on the first save.
 
 **Precedence**:
 
 - API secrets such as Gemini, STT, ElevenLabs, and Discord token are resolved with **values saved in `settings.json` first**, then fall back to environment variables
 
-You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`).
+You can edit `settings.json` or generate it entirely from **Settings** inside the dashboard TUI (`python -m src.main --tui`). Released Windows bundles keep `settings-example.json` as reference-only and preserve an existing `settings.json` during updates.
 
 **Encrypting secrets in `settings.json`:** Set **`SETTINGS_SECRET_KEY`** in `.env` with a Fernet key (44-character url-safe base64) to store API keys under `settings.api` or the Discord token under `settings.discord`. plaintext values are rejected on load.
 
@@ -191,7 +192,7 @@ pytest --cov=src --cov-report=html
 
 **Windows releases:** GitHub Actions produces **`DiscordAudioBotTUI-Setup.exe`** (Inno Setup) and a portable **`DiscordAudioBotTUI-windows.zip`**.
 
-The repo ships **`settings-example.json`** as a neutral template; the PyInstaller build copies it to **`settings.json`** next to the executable.
+The repo ships **`settings-example.json`** as a neutral template beside the executable. Windows release builds no longer pre-create `settings.json`, and same-directory upgrades preserve any existing `settings.json`.
 
 Production Windows releases are driven off the **`latest`** branch:
 

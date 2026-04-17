@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -681,6 +683,32 @@ def test_run_playback_only_flow_avoids_receive_lifecycle(monkeypatch) -> None:
         assert playback_manager.play_calls == [Path("clip.mp3")]
 
     run_async(scenario())
+
+
+def test_dashboard_app_imports_voice_user_audio_helper() -> None:
+    """Dashboard import should succeed against the helpers exposed by ``src.main``."""
+    dashboard_app = importlib.import_module("src.ui.dashboard.app")
+
+    assert dashboard_app.voice_user_audio_allowed is main_module.voice_user_audio_allowed
+
+
+def test_main_tui_path_stays_synchronous(monkeypatch) -> None:
+    """``main(... --tui ...)`` should launch the dashboard without entering ``asyncio.run``."""
+    launched: list[str] = []
+    fake_dashboard = SimpleNamespace(
+        run_tui_application=lambda: launched.append("started"),
+    )
+
+    monkeypatch.setattr(main_module, "load_application_dotenv", lambda: None)
+    monkeypatch.setattr(
+        main_module.asyncio,
+        "run",
+        lambda _awaitable: (_ for _ in ()).throw(AssertionError("unexpected asyncio.run")),
+    )
+    monkeypatch.setitem(sys.modules, "src.ui.dashboard.app", fake_dashboard)
+
+    assert main_module.main(["--tui"]) == 0
+    assert launched == ["started"]
 
 
 def test_validate_voice_runtime_checks_audio_file(monkeypatch) -> None:
