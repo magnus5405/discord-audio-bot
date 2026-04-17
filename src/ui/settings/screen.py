@@ -11,7 +11,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Input, Select, TabbedContent, TabPane, TextArea
+from textual.widgets import Button, Footer, Header, Input, Label, Select, TabbedContent, TabPane, TextArea
 
 from src.main import (
     resolve_mention_window_seconds,
@@ -19,7 +19,19 @@ from src.main import (
     resolve_reply_silence_seconds,
 )
 from src.models import Persona
-from src.storage import DEFAULT_STT_LANGUAGE_CODE, SettingsStore
+from src.storage import (
+    DEFAULT_LOCAL_STT_BACKEND,
+    DEFAULT_LOCAL_STT_MODEL,
+    DEFAULT_STT_LANGUAGE_CODE,
+    DEFAULT_STT_PROVIDER,
+    SettingsStore,
+)
+from src.transcription.whispercpp import (
+    WHISPERCPP_MODEL_IDS,
+    describe_whispercpp_model_status,
+    download_whispercpp_model,
+    resolve_whispercpp_models_dir,
+)
 
 from .gemini_models import DEFAULT_TEXT_MODEL_IDS, list_text_generation_model_ids
 from .layout import SETTINGS_SCREEN_CSS
@@ -55,6 +67,8 @@ class BotSettingsScreen(Screen[None]):
         self.store = store
         self._current_character_id: str | None = None
         self._character_model_ids: list[str] = list(DEFAULT_TEXT_MODEL_IDS)
+        self._stt_local_download_task: asyncio.Task[None] | None = None
+        self._stt_local_download_error: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -85,6 +99,10 @@ class BotSettingsScreen(Screen[None]):
         self._load_cooldowns_fields()
         self._load_pricing_fields()
         asyncio.create_task(self._refresh_character_model_options())
+
+    def on_unmount(self) -> None:
+        if self._stt_local_download_task is not None and not self._stt_local_download_task.done():
+            self._stt_local_download_task.cancel()
 
     def _character_options(self) -> list[tuple[str, str]]:
         personas = self.store.get_personalities()
@@ -220,10 +238,67 @@ class BotSettingsScreen(Screen[None]):
         elif options:
             select.value = options[0][1]
 
+    def _local_stt_model_options(self, current_model: str | None = None) -> list[tuple[str, str]]:
+        model_ids: list[str] = []
+        for value in (current_model, *WHISPERCPP_MODEL_IDS):
+            cleaned = str(value or "").strip()
+            if cleaned and cleaned not in model_ids:
+                model_ids.append(cleaned)
+        if not model_ids:
+            model_ids = [DEFAULT_LOCAL_STT_MODEL]
+        return [(model_id, model_id) for model_id in model_ids]
+
+    def _apply_local_stt_model_options(self, current_model: str | None = None) -> None:
+        select = self.query_one("#stt_local_model", Select)
+        previous_value = self._select_text("#stt_local_model")
+        options = self._local_stt_model_options(current_model or previous_value or DEFAULT_LOCAL_STT_MODEL)
+        select.set_options(options)
+        selected_value = (current_model or previous_value or DEFAULT_LOCAL_STT_MODEL).strip()
+        if any(value == selected_value for _, value in options):
+            select.value = selected_value
+        elif options:
+            select.value = options[0][1]
+
     def _sync_stt_backend_visibility(self, backend: str | None = None) -> None:
         resolved_backend = (backend or "").strip().lower() or "v1"
         self.query_one("#stt_v1_fields", Vertical).display = resolved_backend == "v1"
         self.query_one("#stt_v2_fields", Vertical).display = resolved_backend == "v2"
+
+    def _sync_stt_provider_visibility(self, provider: str | None = None) -> None:
+        resolved_provider = (provider or "").strip().lower() or DEFAULT_STT_PROVIDER
+        self.query_one("#stt_google_section", Vertical).display = resolved_provider == "google"
+        self.query_one("#stt_local_section", Vertical).display = resolved_provider == "local"
+        if resolved_provider == "google":
+            self._sync_stt_backend_visibility(self._select_text("#stt_backend") or "v1")
+
+    def _resolved_local_models_dir_from_form(self):
+        raw_dir = self.query_one("#stt_local_models_dir", Input).value.strip()
+        return resolve_whispercpp_models_dir(raw_dir or None)
+
+    def _sync_stt_local_status(self) -> None:
+        raw_dir = self.query_one("#stt_local_models_dir", Input).value.strip()
+        resolved_dir = self._resolved_local_models_dir_from_form()
+        dir_hint = (
+            f"Using default folder: {resolved_dir}"
+            if not raw_dir
+            else f"Using folder: {resolved_dir}"
+        )
+        self.query_one("#stt_local_models_dir_hint", Label).update(dir_hint)
+
+        status_text = ""
+        if self._stt_local_download_task is not None and not self._stt_local_download_task.done():
+            model_id = self._select_text("#stt_local_model") or DEFAULT_LOCAL_STT_MODEL
+            status_text = f"Downloading: ggml-{model_id}.bin"
+        elif self._stt_local_download_error:
+            status_text = f"Failed: {self._stt_local_download_error}"
+        else:
+            model_id = self._select_text("#stt_local_model") or DEFAULT_LOCAL_STT_MODEL
+            status = describe_whispercpp_model_status(model_id, raw_dir or None)
+            status_text = status.message
+        self.query_one("#stt_local_model_status", Label).update(status_text)
+        self.query_one("#btn_stt_local_download", Button).disabled = (
+            self._stt_local_download_task is not None and not self._stt_local_download_task.done()
+        )
 
     def _load_speech_to_text_fields(self) -> None:
         stt = self.store.get_stt_config()
@@ -237,6 +312,10 @@ class BotSettingsScreen(Screen[None]):
         backend = (self.store.resolve_stt_speech_backend() or "v1").strip().lower()
         if backend not in ("v1", "v2"):
             backend = "v1"
+        provider = (self.store.resolve_stt_provider() or DEFAULT_STT_PROVIDER).strip().lower()
+        if provider not in ("google", "local"):
+            provider = DEFAULT_STT_PROVIDER
+        self.query_one("#stt_provider", Select).value = provider
         self.query_one("#stt_backend", Select).value = backend
         self.query_one("#stt_google_api_key", Input).value = self.store.resolve_stt_api_key() or ""
         self.query_one("#stt_google_application_credentials", Input).value = (
@@ -245,7 +324,14 @@ class BotSettingsScreen(Screen[None]):
         self.query_one("#stt_google_project_id", Input).value = self.store.resolve_stt_project_id() or ""
         self.query_one("#stt_google_location", Input).value = self.store.resolve_stt_location() or ""
         self._apply_stt_model_options(self.store.resolve_stt_model() or _DEFAULT_STT_MODEL)
-        self._sync_stt_backend_visibility(backend)
+        self.query_one("#stt_local_models_dir", Input).value = self.store.resolve_stt_local_models_dir() or ""
+        self.query_one("#stt_local_backend", Select).value = (
+            self.store.resolve_stt_local_backend() or DEFAULT_LOCAL_STT_BACKEND
+        )
+        self._apply_local_stt_model_options(self.store.resolve_stt_local_model() or DEFAULT_LOCAL_STT_MODEL)
+        self._stt_local_download_error = ""
+        self._sync_stt_provider_visibility(provider)
+        self._sync_stt_local_status()
 
     def _load_text_to_speech_fields(self) -> None:
         runtime = self.store.get_runtime_config()
@@ -319,6 +405,24 @@ class BotSettingsScreen(Screen[None]):
         backend = "" if event.value in (None, Select.BLANK) else str(event.value).strip().lower()
         backend = backend or "v1"
         self._sync_stt_backend_visibility(backend)
+
+    @on(Select.Changed, "#stt_provider")
+    def on_stt_provider_changed(self, event: Select.Changed) -> None:
+        provider = "" if event.value in (None, Select.BLANK) else str(event.value).strip().lower()
+        provider = provider or DEFAULT_STT_PROVIDER
+        self._stt_local_download_error = ""
+        self._sync_stt_provider_visibility(provider)
+        self._sync_stt_local_status()
+
+    @on(Select.Changed, "#stt_local_model")
+    def on_stt_local_model_changed(self, _event: Select.Changed) -> None:
+        self._stt_local_download_error = ""
+        self._sync_stt_local_status()
+
+    @on(Input.Changed, "#stt_local_models_dir")
+    def on_stt_local_models_dir_changed(self, _event: Input.Changed) -> None:
+        self._stt_local_download_error = ""
+        self._sync_stt_local_status()
 
     @on(Button.Pressed, "#btn_add_character_alias")
     def on_add_character_alias(self) -> None:
@@ -431,10 +535,12 @@ class BotSettingsScreen(Screen[None]):
         alternatives = [entry.strip() for entry in raw_alternatives.split(",") if entry.strip()]
         if not alternatives:
             alternatives = ["en-US"]
+        provider = self._select_text("#stt_provider").lower() or DEFAULT_STT_PROVIDER
         backend = self._select_text("#stt_backend").lower() or "v1"
         self.store.set_stt_config(
             primary,
             alternatives,
+            provider=provider,
             speech_backend=backend,
             google_application_credentials=self.query_one(
                 "#stt_google_application_credentials",
@@ -443,6 +549,9 @@ class BotSettingsScreen(Screen[None]):
             project_id=self.query_one("#stt_google_project_id", Input).value,
             location=self.query_one("#stt_google_location", Input).value,
             model=self._select_text("#stt_google_model"),
+            local_backend=self._select_text("#stt_local_backend") or DEFAULT_LOCAL_STT_BACKEND,
+            local_model=self._select_text("#stt_local_model") or DEFAULT_LOCAL_STT_MODEL,
+            local_models_dir=self.query_one("#stt_local_models_dir", Input).value,
             update_backend_fields=True,
         )
         self.store.apply_stt_api_secrets(
@@ -450,7 +559,59 @@ class BotSettingsScreen(Screen[None]):
             google_stt_project_id="",
         )
         self.store.save()
+        self._stt_local_download_error = ""
+        self._sync_stt_local_status()
         self.notify("Speech-to-Text saved.", title="Settings")
+
+    @on(Button.Pressed, "#btn_stt_local_use_default")
+    def on_stt_local_use_default(self) -> None:
+        self.query_one("#stt_local_models_dir", Input).value = ""
+        self._stt_local_download_error = ""
+        self._sync_stt_local_status()
+        self.notify("Local STT models directory reset to the default app folder.", title="Settings")
+
+    async def _download_local_stt_model(self, model_id: str, models_dir_text: str) -> None:
+        try:
+            path = await download_whispercpp_model(model_id, models_dir_text or None)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("Local STT model download failed")
+            self._stt_local_download_error = str(exc)
+            self.notify(
+                f"Model download failed: {exc}",
+                title="Settings",
+                severity="error",
+            )
+        else:
+            self._stt_local_download_error = ""
+            self.notify(f"Downloaded local STT model to {path}.", title="Settings")
+        finally:
+            self._stt_local_download_task = None
+            try:
+                self._sync_stt_local_status()
+            except Exception:
+                logger.debug("Skipped STT local status refresh during screen teardown.", exc_info=True)
+
+    @on(Button.Pressed, "#btn_stt_local_download")
+    def on_stt_local_download(self) -> None:
+        if self._stt_local_download_task is not None and not self._stt_local_download_task.done():
+            self.notify("A local STT model download is already in progress.", title="Settings")
+            return
+        model_id = self._select_text("#stt_local_model") or DEFAULT_LOCAL_STT_MODEL
+        models_dir_text = self.query_one("#stt_local_models_dir", Input).value.strip()
+        resolved_dir = resolve_whispercpp_models_dir(models_dir_text or None)
+        self._stt_local_download_error = ""
+        self._sync_stt_local_status()
+        self.notify(
+            f"Downloading {model_id} into {resolved_dir}...",
+            title="Settings",
+        )
+        self._stt_local_download_task = asyncio.create_task(
+            self._download_local_stt_model(model_id, models_dir_text),
+            name="settings-stt-model-download",
+        )
+        self._sync_stt_local_status()
 
     @on(Button.Pressed, "#btn_save_tts")
     def on_save_text_to_speech(self) -> None:

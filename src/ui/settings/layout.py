@@ -149,9 +149,12 @@ CharacterAliasRow Button.btn_remove_alias {
     height: auto;
     margin: 0 1;
 }
-#stt_v1_fields, #stt_v2_fields {
+#stt_google_section, #stt_local_section, #stt_v1_fields, #stt_v2_fields {
     width: 1fr;
     height: auto;
+}
+#stt_local_models_dir_hint, #stt_local_model_status {
+    margin-top: 1;
 }
 #character_instruction_group {
     height: auto;
