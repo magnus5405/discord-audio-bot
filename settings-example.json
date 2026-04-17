@@ -14,9 +14,18 @@
         "last_persona_id": "default"
     },
     "stt": {
+        "provider": "google",
         "language_code": "en-US",
         "alternative_language_codes": [
         "en-GB"
-        ]
+        ],
+        "speech_backend": "v1",
+        "google_application_credentials": "",
+        "project_id": "",
+        "location": "",
+        "model": "",
+        "local_backend": "whispercpp",
+        "local_model": "base",
+        "local_models_dir": ""
     }
 }
