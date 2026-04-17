@@ -2,7 +2,7 @@
 ; Run from repo root; expects dist\DiscordAudioBotTUI\
 
 #define MyAppName "Discord Audio Bot TUI"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.1.1"
 #define MyAppExeName "DiscordAudioBotTUI.exe"
 #define MyAppSrc "..\dist\DiscordAudioBotTUI"
 
