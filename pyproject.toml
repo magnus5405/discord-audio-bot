@@ -22,6 +22,7 @@ dependencies = [
     
     # Transcription
     "google-cloud-speech>=2.38.0",
+    "pywhispercpp==1.4.1",
     
     # GenAI / Conversation
     "google-genai>=1.73.0",

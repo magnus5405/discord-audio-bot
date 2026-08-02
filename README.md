@@ -7,14 +7,14 @@
 <img width="1069" height="643" alt="image" src="https://github.com/user-attachments/assets/8ae49b3c-69aa-4ada-b594-f3361e9a0327" />
 
 
-A Discord voice-channel conversational bot with a [Textual TUI](https://textual.textualize.io/). The bot joins voice channels, listens to speakers, transcribes speech in real time, maintains multi-turn conversations using [Google GenAI](https://github.com/googleapis/python-genai), and replies with synthesized speech via [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python).
+A Discord voice-channel conversational bot with a [Textual TUI](https://textual.textualize.io/). The bot joins voice channels, listens to speakers, transcribes speech with either Google Speech-to-Text or local `whisper.cpp`, maintains multi-turn conversations using [Google GenAI](https://github.com/googleapis/python-genai), and replies with synthesized speech via [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python).
 
 ---
 
 ## Features
 
 - **Voice integration**: Joins Discord voice channels via [discord.py](https://github.com/Rapptz/discord.py) and [discord-ext-voice-recv](https://github.com/imayhaveborkedit/discord-ext-voice-recv) with DAVE encryption support
-- **Real-time transcription**: Per-user speech-to-text via [Google Cloud Speech-to-Text](https://github.com/googleapis/python-speech)
+- **Speech-to-Text providers**: Per-user transcription via [Google Cloud Speech-to-Text](https://github.com/googleapis/python-speech) or local `whisper.cpp` through `pywhispercpp`
 - **Conversational AI**: Multi-turn chat with [Google GenAI](https://github.com/googleapis/python-genai) and conversation context
 - **Text-to-speech**: [ElevenLabs](https://github.com/elevenlabs/elevenlabs-python) streaming TTS
 - **Smart reply triggers**:
@@ -48,18 +48,18 @@ Install and run **from source**; follow [Development](#development).
 
 ### API credentials
 
-You need accounts for **Discord**, **Google** (Gemini + Speech-to-Text), and **ElevenLabs**:
+You need accounts for **Discord**, **Google Gemini**, and **ElevenLabs**. Google Cloud credentials are only required when you choose the Google STT provider:
 
 - **Discord**: [Developer Portal](https://discord.com/developers/applications) $\rightarrow$ `DISCORD_TOKEN`.
 - **Gemini**: API key from [Google AI Studio](https://aistudio.google.com/) $\rightarrow$ `GOOGLE_GEMINI_API_KEY`.
-- **Speech-to-Text**: [Google Cloud](https://console.cloud.google.com/) credentials for Speech-to-Text API enabled $\rightarrow$ `GOOGLE_STT_API_KEY` for v1, or service account + project fields for v2.
+- **Speech-to-Text (Google provider only)**: [Google Cloud](https://console.cloud.google.com/) credentials for Speech-to-Text API enabled $\rightarrow$ `GOOGLE_STT_API_KEY` for v1, or service account + project fields for v2.
 - **ElevenLabs**: [API keys](https://elevenlabs.io/app/settings/api-keys) $\rightarrow$ `ELEVENLABS_API_KEY`.
 
 Visit the [Wiki](https://github.com/magnus5405/discord-audio-bot/wiki) for a more detailed description on how to aquire these credentials.
 
 ### Running
 
-Launch **`DiscordAudioBotTUI.exe`**, enter required credentials and configure your character in the settings. After configuring credentials, simply choose a **server**, **voice channel**, and **persona**, then press **Start** to connect.
+Launch **`DiscordAudioBotTUI.exe`**, enter required credentials and configure your character in the settings. For local STT, select **Provider = Local whisper.cpp**, choose a model, and use **Download Model** from the Speech-to-Text settings page. Model files default to `stt-models` beside the app (for example `%LOCALAPPDATA%\Programs\Discord Audio Bot TUI\stt-models` in the installer build) unless you set a custom folder. After configuring credentials and/or downloading a local model, choose a **server**, **voice channel**, and **persona**, then press **Start** to connect.
 
 For dashboard behavior, logging paths, and the settings editor, see [Textual dashboard](#textual-dashboard) under Development.
 
@@ -71,9 +71,6 @@ These are features that are planned or would be valuable additions to the projec
 
 - **SDK-agnostic interface for AI conversation**  
 The current implementation is designed around a specific provider workflow. A provider-agnostic abstraction layer would make it possible to support multiple AI backends through a shared interface. This would allow the project to integrate with providers such as OpenAI, Anthropic or self-hosted local models without changing the surrounding bot logic. See [#13](https://github.com/magnus5405/discord-audio-bot/issues/13)
-
-- **Local Speech-to-Text**  
-The project currently depends on external speech recognition services. Adding support for local Speech-to-Text would make it possible to run the full voice pipeline on the user’s own machine or server. This would reduce API costs and lower latency in some environments. It would also open the door to supporting popular local transcription engines such as [Whisper](https://github.com/openai/whisper)-based solutions or other on-device speech recognition systems. See [#14](https://github.com/magnus5405/discord-audio-bot/issues/14)
 
 - **Local Text-to-Speech**  
 At the moment, voice synthesis depends on an external provider. This was chosen because ElevenLabs offer fair pricing and great voice models, with support for custom voices. Supporting local Text-to-Speech would allow fully self-hosted voice output, which would be useful for privacy-sensitive setups, offline environments, and users who want to avoid external API costs. It would also make the project more flexible for experimentation with custom voices and open-source speech models. See [#15](https://github.com/magnus5405/discord-audio-bot/issues/15)
@@ -109,6 +106,13 @@ There are two layers:
    `.env.example` documents defaults for reply timing, STT backend, optional pricing hints, `DEBUG_MODE`, and `TUI_LOG_FILE`.
 2. **`settings.json`** in the project root — personas, STT language, UI selections, and optional persisted API keys or Discord fields when you save from the TUI settings editor.
    When `settings.json` is missing, the app falls back to `settings-example.json` if present and creates `settings.json` on the first save.
+
+For Speech-to-Text, `settings.json` now stores a top-level `stt.provider` selector:
+
+- `google`: keeps the existing Google-only `speech_backend` selector (`v1` / `v2`) and the same credential fields.
+- `local`: uses `local_backend = whispercpp`, `local_model`, and `local_models_dir`. Leave `local_models_dir` blank to use the default `stt-models` folder beside the app bundle.
+
+The Speech-to-Text settings page can download `whisper.cpp` model files for you. Models are stored outside the release artifacts, use a `*.part` temporary file during download, and only local model files are required for local STT — no Google Speech credentials.
 
 **Precedence**:
 
@@ -206,7 +210,7 @@ Production Windows releases are driven off the **`latest`** branch:
 End-to-end data flow:
 
 ```text
-Discord voice receive $\rightarrow$ preprocessing / optional VAD $\rightarrow$ Google STT
+Discord voice receive $\rightarrow$ preprocessing / optional VAD $\rightarrow$ Google STT or local whisper.cpp
   $\rightarrow$ conversation log + reply policy $\rightarrow$ Google GenAI $\rightarrow$ ElevenLabs TTS $\rightarrow$ Discord playback
 ```
 
@@ -242,8 +246,9 @@ src/
 ├── transcription/
 │   ├── coordinator.py      # Per-user STT orchestration
 │   ├── preprocessing.py    # PCM helpers
-│   ├── stt.py              # STT client factory / streaming API
+│   ├── stt.py              # STT client factory / provider-neutral API
 │   ├── stt_v1.py           # Speech-to-Text v1 client
+│   ├── whispercpp.py       # Local whisper.cpp backend + model helpers
 │   └── vad.py              # Optional WebRTC VAD
 ├── tts/
 │   └── elevenlabs.py       # ElevenLabs HTTP client
@@ -266,7 +271,7 @@ Discord expects DAVE-capable clients. Keep `discord.py`, `PyNaCl`, `davey`, and 
 
 ### Transcription language
 
-If `settings.json` has no `stt` block, the app defaults to `en-US` with English alternatives where the code supplies them. Set `stt.language_code` and `stt.alternative_language_codes` for your session ([supported languages](https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages)).
+If `settings.json` has no `stt` block, the app defaults to `provider = google`, `language_code = en-US`, and English alternatives where the code supplies them. Set `stt.language_code` and `stt.alternative_language_codes` for your session ([supported Google languages](https://cloud.google.com/speech-to-text/docs/speech-to-text-supported-languages)). In local `whisper.cpp` mode, the app converts BCP-47 hints to Whisper-friendly primary subtags and falls back to auto-detect when multiple distinct languages are configured.
 
 ### Session-only memory
 

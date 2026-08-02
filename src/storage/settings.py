@@ -30,6 +30,14 @@ def default_settings_template_path(settings_path: Optional[Path] = None) -> Path
 
 # Used when ``stt.language_code`` is missing or blank (BCP-47).
 DEFAULT_STT_LANGUAGE_CODE = "en-US"
+DEFAULT_STT_PROVIDER = "google"
+DEFAULT_LOCAL_STT_BACKEND = "whispercpp"
+DEFAULT_LOCAL_STT_MODEL = "base"
+
+
+def default_local_stt_models_dir() -> Path:
+    """Default directory for downloaded local STT models."""
+    return app_bundle_dir() / "stt-models"
 
 
 def repair_utf8_mojibake(text: str) -> str:
@@ -203,6 +211,7 @@ class SettingsStore:
         return self.settings.get(
             "stt",
             {
+                "provider": DEFAULT_STT_PROVIDER,
                 "language_code": DEFAULT_STT_LANGUAGE_CODE,
                 "alternative_language_codes": ["en-US", "en-GB"],
                 "speech_backend": "",
@@ -210,8 +219,19 @@ class SettingsStore:
                 "project_id": "",
                 "location": "",
                 "model": "",
+                "local_backend": DEFAULT_LOCAL_STT_BACKEND,
+                "local_model": DEFAULT_LOCAL_STT_MODEL,
+                "local_models_dir": "",
             },
         )
+
+    def resolve_stt_provider(self) -> str:
+        """Top-level STT provider selector from settings, defaulting to Google for BC."""
+        stt = self.get_stt_config()
+        value = _clean_optional_text(stt.get("provider")).lower()
+        if value in ("google", "local"):
+            return value
+        return DEFAULT_STT_PROVIDER
 
     def resolve_stt_api_key(self) -> str | None:
         """STT API key from settings first, then environment."""
@@ -237,6 +257,29 @@ class SettingsStore:
         if value:
             return value
         return _clean_optional_text(os.getenv("GOOGLE_STT_SPEECH_BACKEND")) or None
+
+    def resolve_stt_local_backend(self) -> str:
+        """Local STT backend selector from settings, defaulting to whisper.cpp."""
+        stt = self.get_stt_config()
+        value = _clean_optional_text(stt.get("local_backend")).lower()
+        return value or DEFAULT_LOCAL_STT_BACKEND
+
+    def resolve_stt_local_model(self) -> str:
+        """Local STT model id from settings, defaulting to the curated base model."""
+        stt = self.get_stt_config()
+        value = _clean_optional_text(stt.get("local_model"))
+        return value or DEFAULT_LOCAL_STT_MODEL
+
+    def resolve_stt_local_models_dir(self) -> str | None:
+        """Optional custom local STT model directory from settings."""
+        stt = self.get_stt_config()
+        value = _clean_optional_text(stt.get("local_models_dir"))
+        return value or None
+
+    def resolve_stt_local_models_dir_path(self) -> Path:
+        """Resolved local STT model directory (settings override or default beside the app)."""
+        raw = self.resolve_stt_local_models_dir()
+        return Path(raw) if raw else default_local_stt_models_dir()
 
     def resolve_stt_credentials_path(self) -> str | None:
         """Speech v2 service-account JSON path from settings first, then environment."""
@@ -267,11 +310,15 @@ class SettingsStore:
         language_code: str,
         alternative_language_codes: list[str],
         *,
+        provider: str | None = None,
         speech_backend: str | None = None,
         google_application_credentials: str | None = None,
         project_id: str | None = None,
         location: str | None = None,
         model: str | None = None,
+        local_backend: str | None = None,
+        local_model: str | None = None,
+        local_models_dir: str | None = None,
         update_backend_fields: bool = False,
     ) -> None:
         """Replace or merge the in-memory ``stt`` block (call ``save()`` to write ``settings.json``)."""
@@ -279,7 +326,8 @@ class SettingsStore:
         stt["language_code"] = language_code.strip() or DEFAULT_STT_LANGUAGE_CODE
         stt["alternative_language_codes"] = alternative_language_codes
         if update_backend_fields:
-            _set_clean_optional_text(stt, "speech_backend", speech_backend)
+            stt["provider"] = _clean_optional_text(provider).lower() or DEFAULT_STT_PROVIDER
+            _set_clean_optional_text(stt, "speech_backend", _clean_optional_text(speech_backend).lower())
             _set_clean_optional_text(
                 stt,
                 "google_application_credentials",
@@ -288,6 +336,9 @@ class SettingsStore:
             _set_clean_optional_text(stt, "project_id", project_id)
             _set_clean_optional_text(stt, "location", location)
             _set_clean_optional_text(stt, "model", model)
+            stt["local_backend"] = _clean_optional_text(local_backend).lower() or DEFAULT_LOCAL_STT_BACKEND
+            stt["local_model"] = _clean_optional_text(local_model) or DEFAULT_LOCAL_STT_MODEL
+            _set_clean_optional_text(stt, "local_models_dir", local_models_dir)
         self.settings["stt"] = stt
         logger.debug("STT config updated in memory")
 
@@ -299,6 +350,14 @@ class SettingsStore:
                 stt[key] = list(value)
             elif key == "language_code":
                 stt[key] = _clean_optional_text(value) or DEFAULT_STT_LANGUAGE_CODE
+            elif key == "provider":
+                stt[key] = _clean_optional_text(value).lower() or DEFAULT_STT_PROVIDER
+            elif key == "local_backend":
+                stt[key] = _clean_optional_text(value).lower() or DEFAULT_LOCAL_STT_BACKEND
+            elif key == "local_model":
+                stt[key] = _clean_optional_text(value) or DEFAULT_LOCAL_STT_MODEL
+            elif key == "speech_backend":
+                _set_clean_optional_text(stt, key, _clean_optional_text(value).lower())
             else:
                 _set_clean_optional_text(stt, key, value)
         self.settings["stt"] = stt

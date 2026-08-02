@@ -377,12 +377,16 @@ async def run_transcription_mode(
     stt_client = GoogleSTTClient(
         primary_language=stt_config.get("language_code", DEFAULT_STT_LANGUAGE_CODE),
         alternative_languages=stt_config.get("alternative_language_codes", ["en-US"]),
+        provider=settings_store.resolve_stt_provider(),
         api_key=settings_store.resolve_stt_api_key(),
         project_id=settings_store.resolve_stt_project_id(),
         location=settings_store.resolve_stt_location(),
         model=settings_store.resolve_stt_model(),
         credentials_path=settings_store.resolve_stt_credentials_path(),
         speech_backend=settings_store.resolve_stt_speech_backend(),
+        local_backend=settings_store.resolve_stt_local_backend(),
+        local_model=settings_store.resolve_stt_local_model(),
+        local_models_dir=str(settings_store.resolve_stt_local_models_dir_path()),
     )
     await stt_client.validate_connectivity()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import logging
 import time
@@ -11,7 +12,7 @@ from dataclasses import dataclass
 
 from ..models import AudioFrame, TranscriptSegment
 from .preprocessing import convert_to_linear16
-from .stt import GoogleSTTV1Client, GoogleSTTV2Client
+from .stt import STTClient
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class PerUserTranscriptionCoordinator:
 
     def __init__(
         self,
-        stt_client: GoogleSTTV1Client | GoogleSTTV2Client,
+        stt_client: STTClient,
         segment_handler: SegmentHandler,
         *,
         idle_timeout_seconds: float = 0.5,
@@ -55,11 +56,27 @@ class PerUserTranscriptionCoordinator:
         self._all_tasks: set[asyncio.Task[None]] = set()
         self._worker_error: BaseException | None = None
         self._worker_failed = asyncio.Event()
+        self._idle_event = asyncio.Event()
+        self._idle_event.set()
 
     @property
     def active_user_count(self) -> int:
         """Return the number of users with active utterances."""
         return len(self._active_sessions)
+
+    @property
+    def pending_work_count(self) -> int:
+        """Active utterances plus draining utterance tasks still finishing STT."""
+        active_tasks = {session.task for session in self._active_sessions.values()}
+        draining_tasks = sum(
+            1 for task in self._all_tasks if not task.done() and task not in active_tasks
+        )
+        return len(self._active_sessions) + draining_tasks
+
+    @property
+    def has_pending_work(self) -> bool:
+        """Whether any utterance is still collecting audio or finishing transcription."""
+        return self.pending_work_count > 0
 
     async def run(
         self,
@@ -121,9 +138,32 @@ class PerUserTranscriptionCoordinator:
             await self._close_session(user_id)
 
         if not self._all_tasks:
+            self._refresh_pending_state()
             return
 
         await asyncio.gather(*list(self._all_tasks))
+        self._refresh_pending_state()
+
+    async def wait_for_idle(self) -> None:
+        """Wait until no utterances remain active or draining."""
+        while True:
+            self._raise_worker_error()
+            if not self.has_pending_work:
+                return
+            idle_wait = asyncio.create_task(self._idle_event.wait())
+            failed_wait = asyncio.create_task(self._worker_failed.wait())
+            done, pending = await asyncio.wait(
+                {idle_wait, failed_wait},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in pending:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            for task in done:
+                await task
+            self._raise_worker_error()
 
     async def _close_idle_sessions(self, reference_monotonic: float | None = None) -> None:
         now = time.monotonic() if reference_monotonic is None else reference_monotonic
@@ -148,7 +188,7 @@ class PerUserTranscriptionCoordinator:
             ),
             name=f"stt-utterance-{frame.user_id}",
         )
-        task.add_done_callback(self._all_tasks.discard)
+        task.add_done_callback(self._handle_task_done)
         self._all_tasks.add(task)
 
         session = _UtteranceSession(
@@ -161,6 +201,7 @@ class PerUserTranscriptionCoordinator:
             task=task,
         )
         self._active_sessions[frame.user_id] = session
+        self._refresh_pending_state()
         logger.debug("Started STT utterance for %s (%s)", frame.username, frame.user_id)
         return session
 
@@ -170,6 +211,7 @@ class PerUserTranscriptionCoordinator:
             return
 
         session.audio_queue.put_nowait(None)
+        self._refresh_pending_state()
         logger.debug("Closed STT utterance for %s (%s)", session.username, session.user_id)
 
     async def _consume_utterance(
@@ -204,6 +246,18 @@ class PerUserTranscriptionCoordinator:
             if self._worker_error is None:
                 self._worker_error = exc
                 self._worker_failed.set()
+        finally:
+            self._refresh_pending_state()
+
+    def _handle_task_done(self, task: asyncio.Task[None]) -> None:
+        self._all_tasks.discard(task)
+        self._refresh_pending_state()
+
+    def _refresh_pending_state(self) -> None:
+        if self.has_pending_work:
+            self._idle_event.clear()
+        else:
+            self._idle_event.set()
 
     def _raise_worker_error(self) -> None:
         if self._worker_failed.is_set() and self._worker_error is not None:

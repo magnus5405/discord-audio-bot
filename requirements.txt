@@ -2,6 +2,7 @@
 discord.py>=2.2.0
 discord-ext-voice-recv>=0.5.2a179
 google-cloud-speech>=2.21.0
+pywhispercpp==1.4.1
 google-genai>=0.3.0
 elevenlabs>=0.2.0
 textual>=0.50.0

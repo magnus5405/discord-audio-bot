@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from src.session import SessionMetrics
 
 
@@ -15,8 +17,24 @@ def format_usd_compact(amount: float) -> str:
     return f"{sign}${body}"
 
 
-def format_stt_minutes_with_price(minutes: float, usd_per_minute: float) -> str:
+def format_stt_minutes_with_price(
+    minutes: float,
+    usd_per_minute: float,
+    *,
+    provider: str = "google",
+    average_inference_seconds: float | None = None,
+) -> str:
     """STT audio minutes and estimated STT spend."""
+    if (provider or "").strip().lower() == "local":
+        if average_inference_seconds is None:
+            return f"{minutes:.2f} min (avg --)"
+        try:
+            avg_seconds = float(average_inference_seconds)
+        except (TypeError, ValueError):
+            return f"{minutes:.2f} min (avg --)"
+        if not math.isfinite(avg_seconds) or avg_seconds <= 0.0:
+            return f"{minutes:.2f} min (avg --)"
+        return f"{minutes:.2f} min (avg {avg_seconds:.2f}s)"
     usd = float(minutes) * float(usd_per_minute)
     return f"{minutes:.2f} min ({format_usd_compact(usd)})"
 

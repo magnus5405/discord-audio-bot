@@ -8,7 +8,7 @@ import os
 import time
 from array import array
 from collections.abc import AsyncIterator
-from typing import Optional
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 import google.auth
 from google.api_core import exceptions as google_exceptions
@@ -21,6 +21,7 @@ from ..models import TranscriptSegment
 from ..storage.settings import DEFAULT_STT_LANGUAGE_CODE
 from .preprocessing import get_audio_duration
 from .stt_v1 import GoogleSTTV1Client
+from .whispercpp import WHISPERCPP_BACKEND_ID, WhisperCppSTTClient
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,31 @@ logger = logging.getLogger(__name__)
 _DEFAULT_STT_V2_MODEL = "chirp_3"
 # Chirp 3 rejects >2 language hints on StreamingRecognize / Recognize (generic INVALID_ARGUMENT).
 _CHIRP3_MAX_LANGUAGE_CODES = 2
+
+
+@runtime_checkable
+class STTClient(Protocol):
+    """Provider-neutral Speech-to-Text client contract."""
+
+    async def validate_connectivity(self) -> None: ...
+
+    def stream_recognize(
+        self,
+        audio_stream: AsyncIterator[bytes],
+        user_id: int,
+        username: str,
+        sample_rate_hz: int = 48000,
+        utterance_started_at: float | None = None,
+    ) -> AsyncIterator[TranscriptSegment]: ...
+
+    async def recognize_batch(
+        self,
+        audio_bytes: bytes,
+        user_id: int,
+        username: str,
+        sample_rate_hz: int = 48000,
+        utterance_started_at: float | None = None,
+    ) -> Optional[TranscriptSegment]: ...
 
 
 class GoogleSTTV2Client:
@@ -725,9 +751,10 @@ def _create_google_stt_client(
     )
 
 
-def GoogleSTTClient(
+def create_stt_client(
     primary_language: str = DEFAULT_STT_LANGUAGE_CODE,
     alternative_languages: Optional[list[str]] = None,
+    provider: str | None = None,
     api_key: str | None = None,
     project_id: str | None = None,
     location: str | None = None,
@@ -735,8 +762,27 @@ def GoogleSTTClient(
     credentials_path: str | None = None,
     client: speech_v2.SpeechAsyncClient | None = None,
     speech_backend: str | None = None,
-) -> GoogleSTTV2Client | GoogleSTTV1Client:
-    """Public constructor: returns v2 client or legacy v1 client depending on env and project id."""
+    local_backend: str | None = None,
+    local_model: str | None = None,
+    local_models_dir: str | None = None,
+    on_inference_seconds: Callable[[float], None] | None = None,
+) -> STTClient:
+    """Provider-aware STT factory for Google v1/v2 and local whisper.cpp."""
+    selected_provider = (provider or "").strip().lower() or "google"
+    if selected_provider == "local":
+        resolved_local_backend = (local_backend or "").strip().lower() or WHISPERCPP_BACKEND_ID
+        if resolved_local_backend != WHISPERCPP_BACKEND_ID:
+            raise ValueError(f"Unsupported local STT backend: {local_backend!r}")
+        return WhisperCppSTTClient(
+            primary_language=primary_language,
+            alternative_languages=alternative_languages,
+            local_backend=resolved_local_backend,
+            local_model=local_model,
+            local_models_dir=local_models_dir,
+            on_inference_seconds=on_inference_seconds,
+        )
+    if selected_provider != "google":
+        raise ValueError(f"Unsupported STT provider: {provider!r}")
     return _create_google_stt_client(
         primary_language=primary_language,
         alternative_languages=alternative_languages,
@@ -747,4 +793,39 @@ def GoogleSTTClient(
         credentials_path=credentials_path,
         client=client,
         speech_backend=speech_backend,
+    )
+
+
+def GoogleSTTClient(
+    primary_language: str = DEFAULT_STT_LANGUAGE_CODE,
+    alternative_languages: Optional[list[str]] = None,
+    provider: str | None = None,
+    api_key: str | None = None,
+    project_id: str | None = None,
+    location: str | None = None,
+    model: str | None = None,
+    credentials_path: str | None = None,
+    client: speech_v2.SpeechAsyncClient | None = None,
+    speech_backend: str | None = None,
+    local_backend: str | None = None,
+    local_model: str | None = None,
+    local_models_dir: str | None = None,
+    on_inference_seconds: Callable[[float], None] | None = None,
+) -> STTClient:
+    """Backward-compatible STT constructor now selecting Google or local providers."""
+    return create_stt_client(
+        primary_language=primary_language,
+        alternative_languages=alternative_languages,
+        provider=provider,
+        api_key=api_key,
+        project_id=project_id,
+        location=location,
+        model=model,
+        credentials_path=credentials_path,
+        client=client,
+        speech_backend=speech_backend,
+        local_backend=local_backend,
+        local_model=local_model,
+        local_models_dir=local_models_dir,
+        on_inference_seconds=on_inference_seconds,
     )

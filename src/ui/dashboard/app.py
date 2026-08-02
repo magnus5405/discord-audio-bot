@@ -27,6 +27,7 @@ from src.main import (
 from src.session import ConversationRunnerConfig, SessionMetrics, run_voice_conversation
 from src.storage import SettingsStore
 from src.storage.reply_locale import resolve_bot_reply_language_code
+from src.transcription.whispercpp import describe_whispercpp_model_status
 from src.tts import resolve_elevenlabs_api_key
 from src.ui.widgets import MetricTile
 
@@ -67,6 +68,7 @@ class BotDashboardApp(App[None]):
         self._connect_task: asyncio.Task[None] | None = None
         self._user_stopped_session = False
         self._transcript_snapshot: tuple[str, ...] = ()
+        self._transcript_rendered_lines = 0
         self._refreshing = False
         self._channels_loading = False
         self._last_status_line = ""
@@ -150,9 +152,12 @@ class BotDashboardApp(App[None]):
             return
         self._transcript_snapshot = snapshot
         log = self.query_one("#transcript_log", RichLog)
-        log.clear()
-        for line in snapshot:
+        if len(snapshot) < self._transcript_rendered_lines:
+            log.clear()
+            self._transcript_rendered_lines = 0
+        for line in snapshot[self._transcript_rendered_lines :]:
             log.write(line)
+        self._transcript_rendered_lines = len(snapshot)
         log.scroll_end(animate=False)
 
     def _loading(self) -> bool:
@@ -218,6 +223,7 @@ class BotDashboardApp(App[None]):
         self._show_session_dashboard(False)
         self.query_one("#transcript_wrap").display = False
         self._transcript_snapshot = ()
+        self._transcript_rendered_lines = 0
         self.query_one("#persona_select", Select).disabled = False
         self.query_one("#persona_hint", Static).update("")
 
@@ -256,7 +262,7 @@ class BotDashboardApp(App[None]):
             summary = (self._discord.last_app_command_sync_summary or "").strip()
             if summary:
                 self.call_later(self._append_activity_line, summary)
-            self._set_status("Connected. Highlight a server to load voice channels.")
+            self._set_status("Connected to Discord.")
         except Exception as exc:
             logger.exception("Discord connect failed")
             self._set_status(f"Discord error: {exc}")
@@ -322,46 +328,54 @@ class BotDashboardApp(App[None]):
             self.call_later(self._sync_selector_loader_visibility)
 
     def _refresh_metrics_bar(self) -> None:
-        metrics = self._metrics
-        if self._session_live():
-            rates = self._settings_store.resolve_pricing_config()
-            stt_minutes = metrics.stt_seconds / 60.0
-            self.query_one("#dash_session_timer", MetricTile).set_value(
-                format_session_timer(metrics.session_duration_seconds())
-            )
-            self.query_one("#dash_stt_minutes", MetricTile).set_value(
-                format_stt_minutes_with_price(stt_minutes, rates["google_stt_usd_per_minute"])
-            )
-            self.query_one("#dash_tokens", MetricTile).set_value(
-                format_genai_tokens_with_price(
-                    metrics.genai_input_tokens,
-                    metrics.genai_output_tokens,
-                    rates["genai_usd_per_1m_input_tokens"],
-                    rates["genai_usd_per_1m_output_tokens"],
+        try:
+            metrics = self._metrics
+            if self._session_live():
+                rates = self._settings_store.resolve_pricing_config()
+                stt_minutes = metrics.stt_seconds / 60.0
+                self.query_one("#dash_session_timer", MetricTile).set_value(
+                    format_session_timer(metrics.session_duration_seconds())
                 )
-            )
-            self.query_one("#dash_eleven_chars", MetricTile).set_value(
-                format_eleven_chars_with_price(
-                    metrics.tts_characters,
-                    rates["elevenlabs_usd_per_1k_characters"],
+                self.query_one("#dash_stt_minutes", MetricTile).set_value(
+                    format_stt_minutes_with_price(
+                        stt_minutes,
+                        rates["google_stt_usd_per_minute"],
+                        provider=self._settings_store.resolve_stt_provider(),
+                        average_inference_seconds=metrics.average_stt_inference_seconds(),
+                    )
                 )
-            )
-            self.query_one("#dash_cooldown", MetricTile).set_value(
-                format_cooldown_tile(metrics.cooldown_seconds_left)
-            )
-            self.query_one("#dash_mention", MetricTile).set_value(format_mention_tile(metrics))
-            self._sync_transcript_log()
-            self._set_status(metrics.status_line)
+                self.query_one("#dash_tokens", MetricTile).set_value(
+                    format_genai_tokens_with_price(
+                        metrics.genai_input_tokens,
+                        metrics.genai_output_tokens,
+                        rates["genai_usd_per_1m_input_tokens"],
+                        rates["genai_usd_per_1m_output_tokens"],
+                    )
+                )
+                self.query_one("#dash_eleven_chars", MetricTile).set_value(
+                    format_eleven_chars_with_price(
+                        metrics.tts_characters,
+                        rates["elevenlabs_usd_per_1k_characters"],
+                    )
+                )
+                self.query_one("#dash_cooldown", MetricTile).set_value(
+                    format_cooldown_tile(metrics.cooldown_seconds_left)
+                )
+                self.query_one("#dash_mention", MetricTile).set_value(format_mention_tile(metrics))
+                self._sync_transcript_log()
 
-        if self._session_task and self._session_task.done():
-            self._session_task = None
-            self._reset_session_ui()
-            if metrics.last_error:
-                self._set_status(f"Session ended: {metrics.last_error}")
-            elif not self._user_stopped_session:
-                self._set_status("Session finished.")
-            self._user_stopped_session = False
-            self.call_later(self._sync_start_button_state)
+            if self._session_task and self._session_task.done():
+                self._session_task = None
+                self._reset_session_ui()
+                if metrics.last_error:
+                    self._set_status(f"Session ended: {metrics.last_error}")
+                elif not self._user_stopped_session:
+                    self._set_status("Session finished.")
+                self._user_stopped_session = False
+                self.call_later(self._sync_start_button_state)
+        except Exception:
+            logger.exception("Dashboard metrics refresh failed")
+            self._set_status("Dashboard metrics refresh failed; check logs.")
 
     @on(DataTable.RowHighlighted, "#guild_table")
     async def on_guild_highlight(self, event: DataTable.RowHighlighted) -> None:
@@ -435,35 +449,47 @@ class BotDashboardApp(App[None]):
         if not gemini_key:
             self._set_status("Set the Gemini API key in Settings > Text-to-Speech or .env.")
             return
-        stt_backend = (self._settings_store.resolve_stt_speech_backend() or "").strip().lower()
-        stt_key = self._settings_store.resolve_stt_api_key()
-        stt_credentials_path = self._settings_store.resolve_stt_credentials_path()
-        stt_project = self._settings_store.resolve_stt_project_id()
-        stt_location = self._settings_store.resolve_stt_location()
-        stt_model = self._settings_store.resolve_stt_model()
-        use_stt_v2 = stt_backend == "v2" or (
-            not stt_backend
-            and any(value for value in (stt_credentials_path, stt_project, stt_location, stt_model))
-        )
-        if use_stt_v2:
-            if not stt_credentials_path:
-                self._set_status("Set the STT service account JSON path in Settings > Speech-to-Text.")
+        stt_provider = self._settings_store.resolve_stt_provider()
+        if stt_provider == "local":
+            status = describe_whispercpp_model_status(
+                self._settings_store.resolve_stt_local_model(),
+                self._settings_store.resolve_stt_local_models_dir() or None,
+            )
+            if status.state != "downloaded":
+                self._set_status(
+                    f"{status.message} Open Settings > Speech-to-Text and download the selected local model before starting."
+                )
                 return
-            if not Path(stt_credentials_path).exists():
-                self._set_status("The STT service account JSON path does not exist.")
+        else:
+            stt_backend = (self._settings_store.resolve_stt_speech_backend() or "").strip().lower()
+            stt_key = self._settings_store.resolve_stt_api_key()
+            stt_credentials_path = self._settings_store.resolve_stt_credentials_path()
+            stt_project = self._settings_store.resolve_stt_project_id()
+            stt_location = self._settings_store.resolve_stt_location()
+            stt_model = self._settings_store.resolve_stt_model()
+            use_stt_v2 = stt_backend == "v2" or (
+                not stt_backend
+                and any(value for value in (stt_credentials_path, stt_project, stt_location, stt_model))
+            )
+            if use_stt_v2:
+                if not stt_credentials_path:
+                    self._set_status("Set the STT service account JSON path in Settings > Speech-to-Text.")
+                    return
+                if not Path(stt_credentials_path).exists():
+                    self._set_status("The STT service account JSON path does not exist.")
+                    return
+                if not stt_project:
+                    self._set_status("Set the Google STT project ID in Settings > Speech-to-Text.")
+                    return
+                if not stt_location:
+                    self._set_status("Set the Google STT location in Settings > Speech-to-Text.")
+                    return
+                if not stt_model:
+                    self._set_status("Set the Google STT model in Settings > Speech-to-Text.")
+                    return
+            elif not stt_key:
+                self._set_status("Set the Google STT API key in Settings > Speech-to-Text or .env.")
                 return
-            if not stt_project:
-                self._set_status("Set the Google STT project ID in Settings > Speech-to-Text.")
-                return
-            if not stt_location:
-                self._set_status("Set the Google STT location in Settings > Speech-to-Text.")
-                return
-            if not stt_model:
-                self._set_status("Set the Google STT model in Settings > Speech-to-Text.")
-                return
-        elif not stt_key:
-            self._set_status("Set the Google STT API key in Settings > Speech-to-Text or .env.")
-            return
         elevenlabs_key = resolve_elevenlabs_api_key(self._settings_store)
         if not elevenlabs_key:
             self._set_status("Set the ElevenLabs API key in Settings > Text-to-Speech or .env.")
@@ -483,6 +509,7 @@ class BotDashboardApp(App[None]):
         self._show_session_dashboard(True)
         self.query_one("#transcript_wrap").display = True
         self._transcript_snapshot = ()
+        self._transcript_rendered_lines = 0
         self.query_one("#transcript_log", RichLog).clear()
         self.query_one("#persona_select", Select).disabled = True
         self._metrics = SessionMetrics()

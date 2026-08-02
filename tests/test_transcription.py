@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import threading
+import time
 from array import array
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +21,13 @@ from src.storage.transcripts import TranscriptSessionWriter
 from src.transcription.coordinator import PerUserTranscriptionCoordinator
 from src.transcription.preprocessing import convert_to_linear16, get_audio_duration, to_mono
 from src.transcription.stt import GoogleSTTClient, GoogleSTTV1Client, GoogleSTTV2Client
+from src.transcription.whispercpp import (
+    WhisperCppSTTClient,
+    _available_cpu_threads,
+    _resolve_whispercpp_log_redirect_target,
+    is_ignorable_transcript_text,
+    pcm16_bytes_to_float32,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -682,3 +693,296 @@ def test_transcript_session_writer_rewrites_valid_session_json(tmp_path):
         "tts_characters": 0,
         "stt_seconds_processed": 0.0,
     }
+
+
+def test_whispercpp_pcm16_bytes_to_float32_converts_audio_samples() -> None:
+    audio = array("h", [0, 16384, -16384]).tobytes()
+
+    pcmf32 = pcm16_bytes_to_float32(audio)
+
+    assert pcmf32.dtype.name == "float32"
+    assert pcmf32.tolist() == pytest.approx([0.0, 0.5, -0.5], rel=1e-5, abs=1e-5)
+
+
+def test_stt_factory_selects_local_whispercpp_provider(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+
+    class FakeModel:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, _audio, **_params):
+            return []
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+
+    stt_client = GoogleSTTClient(
+        primary_language="da-DK",
+        alternative_languages=["en-US"],
+        provider="local",
+        local_backend="whispercpp",
+        local_model="base",
+        local_models_dir=str(tmp_path),
+    )
+
+    assert isinstance(stt_client, WhisperCppSTTClient)
+    assert stt_client.model_path == model_path
+
+
+def test_whispercpp_client_maps_segments_and_normalizes_language_hints(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    seen: dict[str, object] = {}
+
+    class FakeModel:
+        def __init__(self, model_path_arg: str, **kwargs) -> None:
+            seen["model_path"] = model_path_arg
+            seen["init_kwargs"] = kwargs
+
+        def transcribe(self, audio, **params):
+            seen["audio_size"] = int(audio.size)
+            seen["language"] = params.get("language")
+            return [
+                SimpleNamespace(t0=0, t1=12, text="Hej"),
+                SimpleNamespace(t0=12, t1=25, text="verden"),
+            ]
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+
+    client = WhisperCppSTTClient(
+        primary_language="da-DK",
+        alternative_languages=["da-GL"],
+        local_model="base",
+        local_models_dir=str(tmp_path),
+    )
+
+    async def audio_stream():
+        yield array("h", [1, 2, 3, 4]).tobytes()
+
+    segments = run_async(
+        _collect_async_segments(
+            client.stream_recognize(
+                audio_stream=audio_stream(),
+                user_id=123,
+                username="Alice",
+                utterance_started_at=100.0,
+            )
+        )
+    )
+
+    assert seen["model_path"] == str(model_path)
+    assert seen["language"] == "da"
+    assert seen["init_kwargs"]["n_threads"] == _available_cpu_threads()
+    assert seen["init_kwargs"]["redirect_whispercpp_logs_to"] == _resolve_whispercpp_log_redirect_target()
+    assert [segment.text for segment in segments] == ["Hej", "verden"]
+    assert segments[0].start_ts == pytest.approx(100.0)
+    assert segments[0].end_ts == pytest.approx(100.12)
+    assert segments[0].language_code == "da-DK"
+    assert segments[1].start_ts == pytest.approx(100.12)
+    assert segments[1].end_ts == pytest.approx(100.25)
+
+
+def test_whispercpp_client_prefers_primary_language_when_alternatives_differ(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    seen: dict[str, object] = {}
+
+    class FakeModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def transcribe(self, _audio, **params):
+            seen["language"] = params.get("language")
+            return [SimpleNamespace(t0=0, t1=10, text="hello")]
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+    client = WhisperCppSTTClient(
+        primary_language="da-DK",
+        alternative_languages=["en-US"],
+        local_model="base",
+        local_models_dir=str(tmp_path),
+    )
+
+    segment = run_async(
+        client.recognize_batch(
+            array("h", [1, 2, 3, 4]).tobytes(),
+            user_id=1,
+            username="Bob",
+            utterance_started_at=50.0,
+        )
+    )
+
+    assert seen["language"] == "da"
+    assert segment is not None
+    assert segment.language_code == "da-DK"
+
+
+def test_whispercpp_client_ignores_blank_audio_placeholder_segments(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+
+    class FakeModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def transcribe(self, _audio, **_params):
+            return [
+                SimpleNamespace(t0=0, t1=10, text="[BLANK_AUDIO]"),
+                SimpleNamespace(t0=10, t1=20, text="real speech"),
+            ]
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+    client = WhisperCppSTTClient(
+        local_model="base",
+        local_models_dir=str(tmp_path),
+    )
+
+    segment = run_async(
+        client.recognize_batch(
+            array("h", [1, 2, 3, 4]).tobytes(),
+            user_id=1,
+            username="Alice",
+            utterance_started_at=10.0,
+        )
+    )
+
+    assert is_ignorable_transcript_text("[BLANK_AUDIO]") is True
+    assert segment is not None
+    assert segment.text == "real speech"
+
+
+def test_whispercpp_client_returns_no_segments_for_empty_audio(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+
+    class FakeModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def transcribe(self, _audio, **_params):
+            raise AssertionError("Transcribe should not be called for empty audio.")
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+    client = WhisperCppSTTClient(local_models_dir=str(tmp_path))
+
+    async def empty_stream():
+        if False:
+            yield b""
+
+    segments = run_async(
+        _collect_async_segments(
+            client.stream_recognize(
+                audio_stream=empty_stream(),
+                user_id=1,
+                username="Alice",
+            )
+        )
+    )
+    batch = run_async(client.recognize_batch(b"", user_id=1, username="Alice"))
+
+    assert segments == []
+    assert batch is None
+
+
+def test_whispercpp_client_missing_model_raises_actionable_error(tmp_path) -> None:
+    client = WhisperCppSTTClient(local_models_dir=str(tmp_path), local_model="base")
+
+    with pytest.raises(RuntimeError, match="Download"):
+        run_async(client.validate_connectivity())
+
+
+def test_whispercpp_client_serializes_concurrent_transcriptions(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    state = {"active": 0, "max_active": 0, "init_count": 0}
+    state_lock = threading.Lock()
+
+    class FakeModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            with state_lock:
+                state["init_count"] += 1
+
+        def transcribe(self, _audio, **_params):
+            with state_lock:
+                state["active"] += 1
+                state["max_active"] = max(state["max_active"], state["active"])
+            time.sleep(0.05)
+            with state_lock:
+                state["active"] -= 1
+            return [SimpleNamespace(t0=0, t1=5, text="ok")]
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+    client = WhisperCppSTTClient(local_models_dir=str(tmp_path), local_model="base")
+
+    async def short_stream():
+        yield array("h", [1, 2, 3, 4]).tobytes()
+
+    async def collect(user_id: int):
+        return [
+            segment
+            async for segment in client.stream_recognize(
+                audio_stream=short_stream(),
+                user_id=user_id,
+                username=f"user-{user_id}",
+                utterance_started_at=10.0,
+            )
+        ]
+
+    async def scenario():
+        return await asyncio.gather(collect(1), collect(2))
+
+    first, second = run_async(scenario())
+
+    assert state["init_count"] == 1
+    assert state["max_active"] == 1
+    assert first[0].text == "ok"
+    assert second[0].text == "ok"
+
+
+def test_whispercpp_client_reports_inference_duration(monkeypatch, tmp_path) -> None:
+    model_path = tmp_path / "ggml-base.bin"
+    model_path.write_bytes(b"model")
+    seen_durations: list[float] = []
+
+    class FakeModel:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def transcribe(self, _audio, **_params):
+            time.sleep(0.01)
+            return [SimpleNamespace(t0=0, t1=5, text="ok")]
+
+    monkeypatch.setattr("src.transcription.whispercpp._import_pywhispercpp_model", lambda: FakeModel)
+    client = WhisperCppSTTClient(
+        local_model="base",
+        local_models_dir=str(tmp_path),
+        on_inference_seconds=seen_durations.append,
+    )
+
+    run_async(
+        client.recognize_batch(
+            array("h", [1, 2, 3, 4]).tobytes(),
+            user_id=1,
+            username="Alice",
+        )
+    )
+
+    assert len(seen_durations) == 1
+    assert seen_durations[0] > 0
+
+
+def test_whispercpp_log_redirect_prefers_active_file_handler(tmp_path: Path) -> None:
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    handler = logging.FileHandler(tmp_path / "custom-tui.log", encoding="utf-8")
+    try:
+        root.handlers = [handler]
+        assert _resolve_whispercpp_log_redirect_target() == handler.baseFilename
+    finally:
+        handler.close()
+        root.handlers = original_handlers
+
+
+async def _collect_async_segments(aiter) -> list[TranscriptSegment]:
+    return [segment async for segment in aiter]

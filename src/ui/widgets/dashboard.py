@@ -24,11 +24,16 @@ class MetricTile(Static):
     def __init__(self, *, tile_id: str, label: str) -> None:
         super().__init__(id=tile_id, classes="metric-tile")
         self._label = label
+        self._current_value = ""
         self.set_value("—")
 
     def set_value(self, value: str) -> None:
         """Update the value line under the fixed label."""
-        self.update(f"[b]{self._label}[/b]\n{escape(value)}")
+        text = str(value)
+        if text == self._current_value:
+            return
+        self._current_value = text
+        self.update(f"[b]{self._label}[/b]\n{escape(text)}")
 
 
 class SessionTimerTile(MetricTile):
